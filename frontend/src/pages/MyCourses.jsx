@@ -3,22 +3,24 @@ import api from '../api/axios';
 
 export default function MyCourses() {
     const [courses, setCourses] = useState([]);
+    const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [view, setView] = useState('list'); // list | detail | addTask
+    const [view, setView] = useState('list');
     const [selectedCourse, setSelectedCourse] = useState(null);
     const [selectedChapter, setSelectedChapter] = useState(null);
 
-    // Modals
     const [showAddCourse, setShowAddCourse] = useState(false);
     const [showAddChapter, setShowAddChapter] = useState(false);
     const [showAddTask, setShowAddTask] = useState(false);
 
-    // Forms
     const [courseForm, setCourseForm] = useState({ titre: '', description: '', niveau: 'Débutant' });
     const [chapterForm, setChapterForm] = useState({ titre: '', ordre: 1 });
-    const [taskForm, setTaskForm] = useState({ titre: '', type: 'SLIDE', contenuUrl: '' });
+    const [taskForm, setTaskForm] = useState({ titre: '', type: 'SLIDE', contenuUrl: '', groupId: '' });
 
-    useEffect(() => { fetchCourses(); }, []);
+    useEffect(() => {
+        fetchCourses();
+        fetchGroups();
+    }, []);
 
     const fetchCourses = async () => {
         try {
@@ -26,6 +28,13 @@ export default function MyCourses() {
             setCourses(res.data);
         } catch (err) { console.error(err); }
         setLoading(false);
+    };
+
+    const fetchGroups = async () => {
+        try {
+            const res = await api.get('/groups');
+            setGroups(res.data);
+        } catch (err) { console.error(err); }
     };
 
     const createCourse = async () => {
@@ -56,9 +65,12 @@ export default function MyCourses() {
     const createTask = async () => {
         if (!taskForm.titre) return alert('Le titre est obligatoire');
         try {
-            await api.post(`/courses/chapters/${selectedChapter.id}/tasks`, taskForm);
+            await api.post(`/courses/chapters/${selectedChapter.id}/tasks`, {
+                ...taskForm,
+                groupId: taskForm.groupId || null,
+            });
             setShowAddTask(false);
-            setTaskForm({ titre: '', type: 'SLIDE', contenuUrl: '' });
+            setTaskForm({ titre: '', type: 'SLIDE', contenuUrl: '', groupId: '' });
             const res = await api.get(`/courses/${selectedCourse.id}`);
             setSelectedCourse(res.data);
             const updatedChapter = res.data.chapters.find(c => c.id === selectedChapter.id);
@@ -73,7 +85,7 @@ export default function MyCourses() {
             await api.delete(`/courses/${id}`);
             setCourses(courses.filter(c => c.id !== id));
             if (selectedCourse?.id === id) { setView('list'); setSelectedCourse(null); }
-        } catch (err) { alert('Erreur suppression'); }
+        } catch (err) { alert('Erreur suppression : ' + err.response?.data?.message); }
     };
 
     const deleteChapter = async (chapterId) => {
@@ -82,7 +94,7 @@ export default function MyCourses() {
             await api.delete(`/courses/chapters/${chapterId}`);
             const res = await api.get(`/courses/${selectedCourse.id}`);
             setSelectedCourse(res.data);
-        } catch (err) { alert('Erreur suppression'); }
+        } catch (err) { alert('Erreur suppression : ' + err.response?.data?.message); }
     };
 
     const deleteTask = async (taskId) => {
@@ -93,7 +105,7 @@ export default function MyCourses() {
             setSelectedCourse(res.data);
             const updatedChapter = res.data.chapters.find(c => c.id === selectedChapter?.id);
             if (updatedChapter) setSelectedChapter(updatedChapter);
-        } catch (err) { alert('Erreur suppression'); }
+        } catch (err) { alert('Erreur suppression : ' + err.response?.data?.message); }
     };
 
     // ===== LIST VIEW =====
@@ -131,9 +143,7 @@ export default function MyCourses() {
                             <div style={styles.ccDesc}>{course.description || 'Aucune description'}</div>
                             <div style={styles.ccMeta}>
                                 <span style={styles.pill}>{course.niveau || 'Débutant'}</span>
-                                <span style={styles.ccChaps}>
-                  {course.chapters?.length || 0} chapitre(s)
-                </span>
+                                <span style={styles.ccChaps}>{course.chapters?.length || 0} chapitre(s)</span>
                             </div>
                             <button
                                 style={styles.ccBtn}
@@ -209,13 +219,10 @@ export default function MyCourses() {
                 <div>
                     {selectedCourse?.chapters?.map((chap, ci) => (
                         <div key={chap.id} style={styles.chapCard}>
-                            {/* Chapter header */}
                             <div style={styles.chapHeader}>
                                 <div style={styles.chapNum}>{ci + 1}</div>
                                 <div style={styles.chapTitle}>{chap.titre}</div>
-                                <div style={styles.chapMeta}>
-                                    {chap.tasks?.length || 0} tâche(s)
-                                </div>
+                                <div style={styles.chapMeta}>{chap.tasks?.length || 0} tâche(s)</div>
                                 <div style={styles.chapActions}>
                                     <button style={styles.btnSmP} onClick={() => {
                                         setSelectedChapter(chap);
@@ -229,35 +236,39 @@ export default function MyCourses() {
                                 </div>
                             </div>
 
-                            {/* Tasks */}
                             <div style={styles.taskList}>
                                 {chap.tasks?.length === 0 ? (
                                     <div style={styles.noTasks}>Aucune tâche — cliquez sur "+ Tâche"</div>
                                 ) : (
-                                    chap.tasks?.map((task, ti) => (
+                                    chap.tasks?.map((task) => (
                                         <div key={task.id} style={styles.taskItem}>
                                             <div style={{
                                                 ...styles.taskIcon,
                                                 background: task.type === 'SLIDE'
                                                     ? 'linear-gradient(135deg,#5B2EE8,#7C52F0)'
-                                                    : task.type === 'EXERCISE'
-                                                        ? 'linear-gradient(135deg,#FF5C35,#FF8C35)'
-                                                        : 'linear-gradient(135deg,#00C48C,#00A376)',
+                                                    : 'linear-gradient(135deg,#FF5C35,#FF8C35)',
                                             }}>
-                                                {task.type === 'SLIDE' ? '📊' : task.type === 'EXERCISE' ? '✏️' : '📝'}
+                                                {task.type === 'SLIDE' ? '📊' : '✏️'}
                                             </div>
                                             <div style={styles.taskInfo}>
                                                 <div style={styles.taskTitle}>{task.titre}</div>
-                                                <div style={styles.taskTypeBadge}>
+                                                <div style={styles.taskMeta}>
                           <span style={{
                               ...styles.pill,
-                              background: task.type === 'SLIDE' ? '#EDE8FF' : task.type === 'EXERCISE' ? '#FFF0EB' : '#ECFDF5',
-                              color: task.type === 'SLIDE' ? '#5B2EE8' : task.type === 'EXERCISE' ? '#CC3300' : '#008060',
+                              background: task.type === 'SLIDE' ? '#EDE8FF' : '#FFF0EB',
+                              color: task.type === 'SLIDE' ? '#5B2EE8' : '#CC3300',
                           }}>
-                            {task.type === 'SLIDE' ? '📊 Slide' : task.type === 'EXERCISE' ? '✏️ Exercice' : '📝 Quiz'}
+                            {task.type === 'SLIDE' ? '📊 Slide' : '✏️ Exercice'}
                           </span>
+                                                    {task.groupId && (
+                                                        <span style={{ ...styles.pill, background: '#ECFDF5', color: '#008060' }}>
+                              👥 Groupe assigné
+                            </span>
+                                                    )}
                                                     {task.contenuUrl && (
-                                                        <span style={styles.urlTag}>🔗 Lien ajouté</span>
+                                                        <span style={{ fontSize: '11px', color: '#6B7280', fontWeight: '600' }}>
+                              🔗 Lien ajouté
+                            </span>
                                                     )}
                                                 </div>
                                             </div>
@@ -316,7 +327,7 @@ export default function MyCourses() {
                                     value={taskForm.type}
                                     onChange={e => setTaskForm({ ...taskForm, type: e.target.value })}>
                                 <option value="SLIDE">📊 Slide (Présentation)</option>
-                                <option value="EXERCISE">✏️ Exercice QCM</option>
+                                <option value="EXERCISE">✏️ Exercice / Devoir</option>
                             </select>
                         </div>
                         {taskForm.type === 'SLIDE' && (
@@ -331,6 +342,20 @@ export default function MyCourses() {
                 </span>
                             </div>
                         )}
+                        <div style={styles.fg}>
+                            <label style={styles.fl}>Assigner à un groupe</label>
+                            <select style={styles.fi}
+                                    value={taskForm.groupId}
+                                    onChange={e => setTaskForm({ ...taskForm, groupId: e.target.value })}>
+                                <option value="">— Tous les groupes —</option>
+                                {groups.map(g => (
+                                    <option key={g.id} value={g.id}>{g.titre}</option>
+                                ))}
+                            </select>
+                            <span style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
+                💡 Si non assigné, tous les étudiants peuvent voir cette tâche
+              </span>
+                        </div>
                         <div style={styles.modalFoot}>
                             <button style={styles.btnO} onClick={() => setShowAddTask(false)}>Annuler</button>
                             <button style={styles.btnP} onClick={createTask}>Créer</button>
@@ -376,11 +401,10 @@ const styles = {
     taskIcon: { width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 },
     taskInfo: { flex: 1 },
     taskTitle: { fontSize: '13px', fontWeight: '700', color: '#1A1040', marginBottom: '4px' },
-    taskTypeBadge: { display: 'flex', gap: '6px', alignItems: 'center' },
+    taskMeta: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' },
     pill: { display: 'inline-flex', padding: '2px 8px', borderRadius: '50px', fontSize: '11px', fontWeight: '800' },
-    urlTag: { fontSize: '11px', color: '#6B7280', fontWeight: '600' },
     modalBg: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-    modal: { background: '#fff', borderRadius: '16px', padding: '32px', width: '500px', maxWidth: '95vw' },
+    modal: { background: '#fff', borderRadius: '16px', padding: '32px', width: '500px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto' },
     modalTitle: { fontFamily: 'sans-serif', fontSize: '20px', fontWeight: '800', color: '#1A1040', marginBottom: '20px' },
     modalFoot: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' },
     fg: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' },

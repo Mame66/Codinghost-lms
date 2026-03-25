@@ -6,11 +6,19 @@ export default function Course() {
     const [selectedCourse, setSelectedCourse] = useState(null);
     const [selectedChapter, setSelectedChapter] = useState(null);
     const [activeTask, setActiveTask] = useState(null);
-    const [view, setView] = useState('tasks'); // tasks | slide | exercise
+    const [view, setView] = useState('tasks');
     const [loading, setLoading] = useState(true);
+
+    // Homework states
+    const [showHomework, setShowHomework] = useState(false);
+    const [homeworkTask, setHomeworkTask] = useState(null);
+    const [homeworkText, setHomeworkText] = useState('');
+    const [studentId, setStudentId] = useState(null);
+    const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
         fetchCourses();
+        fetchStudentId();
     }, []);
 
     const fetchCourses = async () => {
@@ -22,15 +30,55 @@ export default function Course() {
                 if (firstUnlocked) setSelectedChapter(firstUnlocked);
             }
             setCourses(res.data);
-        } catch (err) {
-            console.error(err);
-        }
+        } catch (err) { console.error(err); }
         setLoading(false);
+    };
+
+    const fetchStudentId = async () => {
+        try {
+            const meRes = await api.get('/auth/me');
+            const studentsRes = await api.get('/students');
+            const student = studentsRes.data.find(s => s.user?.login === meRes.data.login);
+            if (student) {
+                setStudentId(student.id);
+                // Filtrer les cours par groupe
+                if (student.enrollments?.length > 0) {
+                    const groupId = student.enrollments[0].group?.id;
+                    const res = await api.get(`/courses/group/${groupId}`);
+                    // Les tâches disponibles pour ce groupe
+                    console.log('Tâches disponibles:', res.data.length);
+                }
+            }
+        } catch (err) { console.error(err); }
     };
 
     const openTask = (task) => {
         setActiveTask(task);
-        setView(task.type === 'SLIDE' ? 'slide' : 'exercise');
+        if (task.type === 'SLIDE') {
+            setView('slide');
+        } else {
+            setHomeworkTask(task);
+            setShowHomework(true);
+        }
+    };
+
+    const submitHomework = async () => {
+        if (!homeworkText.trim()) return alert('Écrivez votre réponse');
+        if (!studentId) return alert('Profil étudiant non trouvé');
+        setSubmitting(true);
+        try {
+            await api.post('/homeworks', {
+                taskId: homeworkTask.id,
+                studentId,
+                contenu: homeworkText,
+            });
+            alert('✅ Devoir soumis avec succès !');
+            setShowHomework(false);
+            setHomeworkText('');
+        } catch (err) {
+            alert(err.response?.data?.message || 'Erreur lors de la soumission');
+        }
+        setSubmitting(false);
     };
 
     if (loading) return (
@@ -39,10 +87,21 @@ export default function Course() {
         </div>
     );
 
+    if (courses.length === 0) return (
+        <div style={{ textAlign: 'center', padding: '60px' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📚</div>
+            <div style={{ fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '800', color: '#1A1040' }}>
+                Aucun cours disponible
+            </div>
+            <div style={{ color: '#6B7280', marginTop: '8px' }}>
+                Votre enseignant n'a pas encore ajouté de cours
+            </div>
+        </div>
+    );
+
     // ===== SLIDE VIEW =====
     if (view === 'slide') return (
         <div style={styles.slideWrap}>
-            {/* Topbar */}
             <div style={styles.slideTb}>
                 <button style={styles.backBtn} onClick={() => setView('tasks')}>←</button>
                 <div style={styles.slideSteps}>
@@ -52,25 +111,34 @@ export default function Course() {
                             background: t.id === activeTask?.id ? '#5B2EE8' : 'rgba(255,255,255,0.1)',
                             color: t.id === activeTask?.id ? '#fff' : 'rgba(255,255,255,0.4)',
                         }}>
-                            {t.locked ? '🔒' : i + 1}
+                            {i + 1}
                         </div>
                     ))}
                 </div>
                 <div style={styles.slideUserBtn}>{selectedCourse?.titre}</div>
             </div>
 
-            {/* Slide content */}
             <div style={styles.slideMain}>
-                <div style={styles.slideCard}>
-                    <div style={styles.slideCardInner}>
-                        <div style={styles.slideIcon}>📊</div>
-                        <h2 style={styles.slideTitle}>{activeTask?.titre}</h2>
-                        <p style={styles.slideSubtitle}>Cours · {selectedCourse?.titre}</p>
+                {activeTask?.contenuUrl ? (
+                    <div style={styles.slideFrameWrap}>
+                        <iframe
+                            style={styles.slideFrame}
+                            src={activeTask.contenuUrl.replace('/edit', '/embed').replace('/pub', '/embed')}
+                            allowFullScreen
+                            title={activeTask.titre}
+                        />
                     </div>
-                    <div style={styles.slideMascot}>🐍</div>
-                </div>
+                ) : (
+                    <div style={styles.slideCard}>
+                        <div style={styles.slideCardInner}>
+                            <div style={styles.slideIcon}>📊</div>
+                            <h2 style={styles.slideTitle}>{activeTask?.titre}</h2>
+                            <p style={styles.slideSubtitle}>Cours · {selectedCourse?.titre}</p>
+                        </div>
+                        <div style={styles.slideMascot}>🐍</div>
+                    </div>
+                )}
 
-                {/* Controls */}
                 <div style={styles.slideControls}>
                     <button style={styles.slideNavBtn}>‹</button>
                     <span style={styles.slidePageNum}>1 · Présentation</span>
@@ -79,62 +147,6 @@ export default function Course() {
 
                 <button style={styles.nextBtn} onClick={() => setView('tasks')}>
                     Suivant
-                </button>
-            </div>
-        </div>
-    );
-
-    // ===== EXERCISE VIEW =====
-    if (view === 'exercise') return (
-        <div style={styles.exWrap}>
-            {/* Topbar */}
-            <div style={styles.exTb}>
-                <button style={styles.exBackBtn} onClick={() => setView('tasks')}>←</button>
-                <div style={styles.exSteps}>
-                    {selectedChapter?.tasks.map((t, i) => (
-                        <div key={t.id} style={{
-                            ...styles.exCircle,
-                            background: t.id === activeTask?.id ? '#fff' : 'rgba(0,0,0,0.3)',
-                            color: t.id === activeTask?.id ? '#5B2EE8' : 'rgba(255,255,255,0.4)',
-                            border: t.id === activeTask?.id
-                                ? '2px solid #fff'
-                                : '2px solid rgba(255,255,255,0.2)',
-                        }}>
-                            {i + 1}
-                        </div>
-                    ))}
-                </div>
-                <div style={styles.exUserBtn}>{selectedCourse?.titre}</div>
-            </div>
-
-            {/* Exercise body */}
-            <div style={styles.exBody}>
-                <div style={styles.exQuestion}>
-                    {activeTask?.titre}
-                </div>
-                <div style={styles.exChoices}>
-                    {['Option A', 'Option B', 'Option C', 'Option D'].map((opt, i) => (
-                        <div
-                            key={i}
-                            style={styles.exChoice}
-                            onClick={e => {
-                                document.querySelectorAll('.ex-choice-item').forEach(el => {
-                                    el.style.borderColor = 'transparent';
-                                });
-                                e.currentTarget.style.borderColor = '#5B2EE8';
-                            }}
-                            className="ex-choice-item"
-                        >
-                            {opt}
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <div style={styles.exFoot}>
-                <button style={styles.exResetBtn}>↺</button>
-                <button style={styles.exAnswerBtn} onClick={() => setView('tasks')}>
-                    RÉPONSE
                 </button>
             </div>
         </div>
@@ -185,21 +197,14 @@ export default function Course() {
 
                 <div style={styles.lcTabs}>
                     <div style={{ ...styles.lct, ...styles.lctOn }}>Toutes les tâches</div>
-                    <div style={styles.lct}>
-                        Incomplètes {selectedChapter?.tasks.length}
-                    </div>
+                    <div style={styles.lct}>Incomplètes {selectedChapter?.tasks.length}</div>
                 </div>
 
-                {/* Tasks */}
                 <div style={styles.ls}>
-                    <div style={styles.lst}>LEÇON 1 · {selectedChapter?.titre}</div>
+                    <div style={styles.lst}>LEÇON · {selectedChapter?.titre}</div>
                     <div style={styles.taskRow}>
                         {selectedChapter?.tasks.map((task, i) => (
-                            <div
-                                key={task.id}
-                                style={styles.taskItem}
-                                onClick={() => openTask(task)}
-                            >
+                            <div key={task.id} style={styles.taskItem} onClick={() => openTask(task)}>
                                 <div style={{
                                     ...styles.taskCircle,
                                     background: task.type === 'SLIDE'
@@ -218,12 +223,47 @@ export default function Course() {
                     </div>
                 </div>
             </div>
+
+            {/* Modal soumission devoir */}
+            {showHomework && (
+                <div style={hwStyles.modalBg} onClick={() => setShowHomework(false)}>
+                    <div style={hwStyles.modal} onClick={e => e.stopPropagation()}>
+                        <h2 style={hwStyles.title}>✏️ {homeworkTask?.titre}</h2>
+                        <div style={hwStyles.typeBadge}>
+                            {homeworkTask?.type === 'EXERCISE' ? '✏️ Exercice' : '📝 Quiz'}
+                        </div>
+                        <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px', lineHeight: 1.6 }}>
+                            Rédigez votre réponse ci-dessous. Votre enseignant la corrigera et vous donnera une note.
+                        </p>
+                        <div style={hwStyles.fg}>
+                            <label style={hwStyles.fl}>Votre réponse</label>
+                            <textarea
+                                style={hwStyles.ta}
+                                placeholder="Écrivez votre réponse ici..."
+                                value={homeworkText}
+                                onChange={e => setHomeworkText(e.target.value)}
+                            />
+                        </div>
+                        <div style={hwStyles.foot}>
+                            <button style={hwStyles.btnO} onClick={() => setShowHomework(false)}>
+                                Annuler
+                            </button>
+                            <button
+                                style={{ ...hwStyles.btnP, opacity: submitting ? 0.7 : 1 }}
+                                onClick={submitHomework}
+                                disabled={submitting}
+                            >
+                                {submitting ? 'Envoi...' : '📤 Soumettre le devoir'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
 
 const styles = {
-    // Layout
     courseLayout: { display: 'flex', gap: 0, height: 'calc(100vh - 100px)', margin: '-24px', overflow: 'hidden' },
     csSidebar: { width: '280px', background: '#fff', borderRight: '1px solid #E5E0F5', overflowY: 'auto', flexShrink: 0 },
     cssInfo: { padding: '18px 16px', borderBottom: '1px solid #E5E0F5' },
@@ -239,8 +279,6 @@ const styles = {
     chNumOn: { background: '#5B2EE8', color: '#fff' },
     chNumLocked: { background: '#E5E7EB', color: '#9CA3AF' },
     chTtl: { fontSize: '13px', fontWeight: '700', color: '#1A1040', lineHeight: 1.3 },
-
-    // Tasks
     lcWrap: { flex: 1, overflowY: 'auto', padding: '28px', background: '#F8F6FF' },
     lcTitle: { fontFamily: 'sans-serif', fontSize: '20px', fontWeight: '800', color: '#1A1040', marginBottom: '16px', textTransform: 'uppercase' },
     lcTabs: { display: 'flex', borderBottom: '2px solid #E5E0F5', marginBottom: '24px' },
@@ -254,8 +292,6 @@ const styles = {
     taskCount: { position: 'absolute', top: '-6px', right: '-4px', background: '#fff', border: '2px solid #E5E0F5', borderRadius: '50px', padding: '1px 5px', fontSize: '10px', fontWeight: '800', color: '#6B7280' },
     taskLabel: { fontSize: '12px', fontWeight: '600', color: '#1A1040', textAlign: 'center', maxWidth: '88px', lineHeight: 1.3 },
     taskType: { fontSize: '11px', color: '#6B7280', fontWeight: '600' },
-
-    // Slide view
     slideWrap: { position: 'fixed', inset: 0, background: '#111827', display: 'flex', flexDirection: 'column', zIndex: 200 },
     slideTb: { height: '52px', background: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.08)', position: 'relative' },
     backBtn: { position: 'absolute', left: '16px', width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '16px' },
@@ -263,7 +299,9 @@ const styles = {
     stepCircle: { width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
     slideUserBtn: { position: 'absolute', right: '16px', padding: '6px 14px', background: '#5B2EE8', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: '700' },
     slideMain: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px 20px' },
-    slideCard: { width: '100%', maxWidth: '860px', background: '#fff', borderRadius: '16px', padding: '60px 48px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '6px solid #5B2EE8', marginBottom: '20px', position: 'relative', overflow: 'hidden' },
+    slideFrameWrap: { width: '100%', maxWidth: '960px', background: '#000', borderRadius: '12px', overflow: 'hidden', marginBottom: '20px', aspectRatio: '16/9' },
+    slideFrame: { width: '100%', height: '100%', border: 'none' },
+    slideCard: { width: '100%', maxWidth: '860px', background: '#fff', borderRadius: '16px', padding: '60px 48px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '6px solid #5B2EE8', marginBottom: '20px' },
     slideCardInner: { flex: 1 },
     slideIcon: { width: '48px', height: '48px', background: '#5B2EE8', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', marginBottom: '24px' },
     slideTitle: { fontFamily: 'sans-serif', fontSize: '36px', fontWeight: '900', color: '#1A1040', marginBottom: '8px' },
@@ -273,19 +311,17 @@ const styles = {
     slideNavBtn: { width: '36px', height: '36px', borderRadius: '9px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '18px' },
     slidePageNum: { fontSize: '14px', fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
     nextBtn: { width: '100%', maxWidth: '860px', padding: '16px', background: '#FFB800', border: 'none', borderRadius: '12px', fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '700', color: '#1A1040', cursor: 'pointer' },
+};
 
-    // Exercise view
-    exWrap: { position: 'fixed', inset: 0, background: '#7C3AED', display: 'flex', flexDirection: 'column', zIndex: 200 },
-    exTb: { height: '52px', background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', position: 'relative' },
-    exBackBtn: { position: 'absolute', left: '16px', width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '16px' },
-    exSteps: { display: 'flex', alignItems: 'center', gap: '8px' },
-    exCircle: { width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
-    exUserBtn: { position: 'absolute', right: '16px', padding: '6px 14px', background: '#5B2EE8', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: '700' },
-    exBody: { flex: 1, padding: '40px', display: 'flex', gap: '24px', alignItems: 'flex-start', maxWidth: '900px', margin: '0 auto', width: '100%' },
-    exQuestion: { width: '240px', flexShrink: 0, background: 'rgba(255,255,255,0.95)', borderRadius: '14px', padding: '22px', fontFamily: 'sans-serif', fontSize: '16px', fontWeight: '700', color: '#1A1040', lineHeight: 1.4 },
-    exChoices: { display: 'flex', flexDirection: 'column', gap: '12px' },
-    exChoice: { background: 'rgba(255,255,255,0.95)', borderRadius: '12px', padding: '16px 22px', fontSize: '14px', fontWeight: '600', color: '#1A1040', cursor: 'pointer', border: '2px solid transparent', transition: 'all 0.2s', minWidth: '200px', textAlign: 'center' },
-    exFoot: { display: 'flex', gap: '12px', padding: '0 40px 32px' },
-    exResetBtn: { width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '20px' },
-    exAnswerBtn: { padding: '0 32px', height: '48px', background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '12px', color: '#fff', fontWeight: '800', fontSize: '14px', letterSpacing: '1px', cursor: 'pointer', textTransform: 'uppercase' },
+const hwStyles = {
+    modalBg: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+    modal: { background: '#fff', borderRadius: '16px', padding: '32px', width: '520px', maxWidth: '95vw' },
+    title: { fontFamily: 'sans-serif', fontSize: '20px', fontWeight: '800', color: '#1A1040', marginBottom: '8px' },
+    typeBadge: { display: 'inline-block', padding: '3px 10px', borderRadius: '50px', background: '#FFF0EB', color: '#CC3300', fontSize: '12px', fontWeight: '800', marginBottom: '12px' },
+    fg: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '16px' },
+    fl: { fontSize: '11px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' },
+    ta: { padding: '12px', border: '1.5px solid #E5E0F5', borderRadius: '9px', fontSize: '13px', color: '#1A1040', outline: 'none', background: '#F8F6FF', minHeight: '150px', resize: 'vertical', fontFamily: 'inherit' },
+    foot: { display: 'flex', justifyContent: 'flex-end', gap: '10px' },
+    btnP: { padding: '9px 20px', background: '#5B2EE8', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
+    btnO: { padding: '9px 20px', background: 'transparent', border: '1.5px solid #E5E0F5', borderRadius: '8px', color: '#1A1040', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
 };
