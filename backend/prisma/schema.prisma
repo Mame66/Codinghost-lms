@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  nom       String
+  prenom    String
+  email     String   @unique
+  login     String   @unique
+  password  String
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+
+  student   Student?
+  taughtGroups Group[] @relation("TeacherGroups")
+  supervisedGroups Group[] @relation("SupervisorGroups")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  TEACHER_VIEW
+  STUDENT
+}
+
+model Student {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id])
+  age         Int?
+  parentNom   String?
+  parentTel   String?
+  parentEmail String?
+  createdAt   DateTime @default(now())
+
+  enrollments Enrollment[]
+  homeworks   Homework[]
+}
+
+model Course {
+  id          Int      @id @default(autoincrement())
+  titre       String
+  description String?
+  niveau      String?
+  createdAt   DateTime @default(now())
+
+  chapters    Chapter[]
+  groups      Group[]
+}
+
+model Chapter {
+  id       Int    @id @default(autoincrement())
+  courseId Int
+  course   Course @relation(fields: [courseId], references: [id])
+  titre    String
+  ordre    Int
+  locked   Boolean @default(true)
+
+  tasks    Task[]
+}
+
+model Task {
+  id        Int      @id @default(autoincrement())
+  chapterId Int
+  chapter   Chapter  @relation(fields: [chapterId], references: [id])
+  titre     String
+  type      TaskType
+  contenuUrl String?
+  ordre     Int
+}
+
+enum TaskType {
+  SLIDE
+  EXERCISE
+}
+
+model Group {
+  id           Int      @id @default(autoincrement())
+  titre        String
+  courseId     Int?
+  course       Course?  @relation(fields: [courseId], references: [id])
+  teacherId    Int?
+  teacher      User?    @relation("TeacherGroups", fields: [teacherId], references: [id])
+  supervisorId Int?
+  supervisor   User?    @relation("SupervisorGroups", fields: [supervisorId], references: [id])
+  lieu         String?
+  statut       GroupStatut @default(INSCRIPTION)
+  format       GroupFormat @default(OFFLINE)
+  type         GroupType   @default(GROUPE)
+  createdAt    DateTime @default(now())
+
+  enrollments  Enrollment[]
+}
+
+enum GroupStatut {
+  ACTIF
+  INSCRIPTION
+  SUSPENDU
+  TERMINE
+}
+
+enum GroupFormat {
+  ONLINE
+  OFFLINE
+  HYBRIDE
+}
+
+enum GroupType {
+  GROUPE
+  INTRO
+  INTENSIF
+  INDIVIDUEL
+}
+
+model Enrollment {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  student   Student  @relation(fields: [studentId], references: [id])
+  groupId   Int
+  group     Group    @relation(fields: [groupId], references: [id])
+  createdAt DateTime @default(now())
+
+  attendance Attendance[]
+}
+
+model Attendance {
+  id           Int        @id @default(autoincrement())
+  enrollmentId Int
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  date         DateTime
+  statut       AttStatut  @default(ABSENT)
+}
+
+enum AttStatut {
+  PRESENT
+  ABSENT
+  EXCUSE
+}
+model Homework {
+  id          Int      @id @default(autoincrement())
+  taskId      Int
+  studentId   Int
+  student     Student  @relation(fields: [studentId], references: [id])
+  contenu     String?
+  note        Float?
+  commentaire String?
+  statut      HomeworkStatut @default(RENDU)
+  createdAt   DateTime @default(now())
+}
+
+enum HomeworkStatut {
+  RENDU
+  CORRIGE
+  EN_ATTENTE
+}
