@@ -66,13 +66,17 @@ model Chapter {
 }
 
 model Task {
-  id        Int      @id @default(autoincrement())
-  chapterId Int
-  chapter   Chapter  @relation(fields: [chapterId], references: [id])
-  titre     String
-  type      TaskType
-  contenuUrl String?
-  ordre     Int
+  id         Int      @id @default(autoincrement())
+    chapterId  Int
+    chapter    Chapter  @relation(fields: [chapterId], references: [id])
+    groupId    Int?
+    group      Group?   @relation(fields: [groupId], references: [id])
+    titre      String
+    type       TaskType
+    contenuUrl String?
+    ordre      Int
+
+    homeworks  Homework[]
 }
 
 enum TaskType {
@@ -96,6 +100,7 @@ model Group {
   createdAt    DateTime @default(now())
 
   enrollments  Enrollment[]
+  tasks Task[]
 }
 
 enum GroupStatut {
@@ -144,14 +149,15 @@ enum AttStatut {
 }
 model Homework {
   id          Int      @id @default(autoincrement())
-  taskId      Int
-  studentId   Int
-  student     Student  @relation(fields: [studentId], references: [id])
-  contenu     String?
-  note        Float?
-  commentaire String?
-  statut      HomeworkStatut @default(RENDU)
-  createdAt   DateTime @default(now())
+    taskId      Int
+    task        Task     @relation(fields: [taskId], references: [id])
+    studentId   Int
+    student     Student  @relation(fields: [studentId], references: [id])
+    contenu     String?
+    note        Float?
+    commentaire String?
+    statut      HomeworkStatut @default(RENDU)
+    createdAt   DateTime @default(now())
 }
 
 enum HomeworkStatut {

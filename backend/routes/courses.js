@@ -78,7 +78,7 @@ router.post('/:id/chapters', protect, allowRoles('ADMIN', 'TEACHER'), async (req
 
 // POST ajouter une tâche
 router.post('/chapters/:chapterId/tasks', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    const { titre, type, contenuUrl, ordre } = req.body;
+    const { titre, type, contenuUrl, ordre, groupId } = req.body;
     try {
         const task = await prisma.task.create({
             data: {
@@ -87,6 +87,7 @@ router.post('/chapters/:chapterId/tasks', protect, allowRoles('ADMIN', 'TEACHER'
                 type: type || 'SLIDE',
                 contenuUrl: contenuUrl || null,
                 ordre: ordre || 1,
+                groupId: groupId ? parseInt(groupId) : null,
             }
         });
         res.status(201).json(task);
@@ -94,7 +95,6 @@ router.post('/chapters/:chapterId/tasks', protect, allowRoles('ADMIN', 'TEACHER'
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
-
 // PUT modifier une tâche
 router.put('/tasks/:taskId', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { titre, type, contenuUrl } = req.body;
@@ -161,6 +161,27 @@ router.delete('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) 
             where: { id: course.id }
         });
         res.json({ message: 'Cours supprimé' });
+    } catch (err) {
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+// GET cours par groupe
+router.get('/group/:groupId', protect, async (req, res) => {
+    try {
+        const tasks = await prisma.task.findMany({
+            where: {
+                OR: [
+                    { groupId: parseInt(req.params.groupId) },
+                    { groupId: null }
+                ]
+            },
+            include: {
+                chapter: {
+                    include: { course: true }
+                }
+            }
+        });
+        res.json(tasks);
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }

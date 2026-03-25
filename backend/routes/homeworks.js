@@ -5,11 +5,12 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
-// GET tous les devoirs (enseignant voit ceux de ses étudiants)
+// GET tous les devoirs
 router.get('/', protect, async (req, res) => {
     try {
         const homeworks = await prisma.homework.findMany({
             include: {
+                task: { select: { titre: true, type: true } },
                 student: {
                     include: {
                         user: { select: { nom: true, prenom: true } }
@@ -24,10 +25,37 @@ router.get('/', protect, async (req, res) => {
     }
 });
 
+// GET devoirs d'un étudiant
+router.get('/student/:studentId', protect, async (req, res) => {
+    try {
+        const homeworks = await prisma.homework.findMany({
+            where: { studentId: parseInt(req.params.studentId) },
+            include: {
+                task: { select: { titre: true, type: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json(homeworks);
+    } catch (err) {
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+
 // POST soumettre un devoir (étudiant)
 router.post('/', protect, async (req, res) => {
     const { taskId, studentId, contenu } = req.body;
     try {
+        // Vérifier si devoir déjà soumis
+        const existing = await prisma.homework.findFirst({
+            where: {
+                taskId: parseInt(taskId),
+                studentId: parseInt(studentId),
+            }
+        });
+        if (existing) {
+            return res.status(400).json({ message: 'Devoir déjà soumis' });
+        }
+
         const homework = await prisma.homework.create({
             data: {
                 taskId: parseInt(taskId),
@@ -60,14 +88,11 @@ router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => 
     }
 });
 
-// GET devoirs d'un étudiant
-router.get('/student/:studentId', protect, async (req, res) => {
+// DELETE supprimer un devoir
+router.delete('/:id', protect, allowRoles('ADMIN'), async (req, res) => {
     try {
-        const homeworks = await prisma.homework.findMany({
-            where: { studentId: parseInt(req.params.studentId) },
-            orderBy: { createdAt: 'desc' }
-        });
-        res.json(homeworks);
+        await prisma.homework.delete({ where: { id: parseInt(req.params.id) } });
+        res.json({ message: 'Devoir supprimé' });
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }

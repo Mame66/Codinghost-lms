@@ -167,5 +167,78 @@ router.delete('/:id', protect, allowRoles('ADMIN'), async (req, res) => {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
+// PUT modifier un étudiant complet
+router.put('/:id/full', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const { nom, prenom, age, parentNom, parentTel, parentEmail, groupId, resetPassword } = req.body;
+
+    try {
+        const student = await prisma.student.findUnique({
+            where: { id: parseInt(req.params.id) },
+            include: { user: true }
+        });
+
+        if (!student) return res.status(404).json({ message: 'Étudiant non trouvé' });
+
+        // Mettre à jour le profil étudiant
+        await prisma.student.update({
+            where: { id: parseInt(req.params.id) },
+            data: {
+                age: age ? parseInt(age) : null,
+                parentNom: parentNom || null,
+                parentTel: parentTel || null,
+                parentEmail: parentEmail || null,
+            }
+        });
+
+        // Mettre à jour le user
+        const userUpdateData = { nom, prenom };
+
+        // Réinitialiser le mot de passe si demandé
+        let newPassword = null;
+        if (resetPassword) {
+            const genPassword = (prenom, nom) => {
+                const initiales = (prenom[0] + nom[0]).toUpperCase();
+                const num = Math.floor(1000 + Math.random() * 8999);
+                const syms = ['!', '@', '#', '*'];
+                return `${initiales}${num}${syms[Math.floor(Math.random() * syms.length)]}`;
+            };
+            newPassword = genPassword(prenom, nom);
+            userUpdateData.password = await require('bcryptjs').hash(newPassword, 10);
+        }
+
+        await prisma.user.update({
+            where: { id: student.userId },
+            data: userUpdateData
+        });
+
+        // Gérer le groupe
+        if (groupId !== undefined) {
+            // Supprimer les anciennes inscriptions
+            await prisma.enrollment.deleteMany({
+                where: { studentId: student.id }
+            });
+
+            // Créer la nouvelle inscription
+            if (groupId) {
+                await prisma.enrollment.create({
+                    data: {
+                        studentId: student.id,
+                        groupId: parseInt(groupId),
+                    }
+                });
+            }
+        }
+
+        res.json({
+            message: 'Étudiant mis à jour',
+            newPassword: newPassword,
+            login: student.user.login,
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
 
 module.exports = router;
