@@ -17,9 +17,9 @@ model User {
   role      Role     @default(STUDENT)
   createdAt DateTime @default(now())
 
-  student   Student?
-  taughtGroups Group[] @relation("TeacherGroups")
-  supervisedGroups Group[] @relation("SupervisorGroups")
+  student          Student?
+  taughtGroups     Group[]  @relation("TeacherGroups")
+  supervisedGroups Group[]  @relation("SupervisorGroups")
 }
 
 enum Role {
@@ -48,16 +48,17 @@ model Course {
   titre       String
   description String?
   niveau      String?
+  groupId     Int?
+  group       Group?   @relation("CourseGroup", fields: [groupId], references: [id])
   createdAt   DateTime @default(now())
 
   chapters    Chapter[]
-  groups      Group[]
 }
 
 model Chapter {
-  id       Int    @id @default(autoincrement())
+  id       Int     @id @default(autoincrement())
   courseId Int
-  course   Course @relation(fields: [courseId], references: [id])
+  course   Course  @relation(fields: [courseId], references: [id])
   titre    String
   ordre    Int
   locked   Boolean @default(true)
@@ -67,16 +68,17 @@ model Chapter {
 
 model Task {
   id         Int      @id @default(autoincrement())
-    chapterId  Int
-    chapter    Chapter  @relation(fields: [chapterId], references: [id])
-    groupId    Int?
-    group      Group?   @relation(fields: [groupId], references: [id])
-    titre      String
-    type       TaskType
-    contenuUrl String?
-    ordre      Int
+  chapterId  Int
+  chapter    Chapter  @relation(fields: [chapterId], references: [id])
+  groupId    Int?
+  group      Group?   @relation("TaskGroup", fields: [groupId], references: [id])
+  titre      String
+  type       TaskType
+  contenuUrl String?
+  ordre      Int
+  locked     Boolean  @default(false)
 
-    homeworks  Homework[]
+  homeworks  Homework[]
 }
 
 enum TaskType {
@@ -85,22 +87,21 @@ enum TaskType {
 }
 
 model Group {
-  id           Int      @id @default(autoincrement())
+  id           Int         @id @default(autoincrement())
   titre        String
-  courseId     Int?
-  course       Course?  @relation(fields: [courseId], references: [id])
   teacherId    Int?
-  teacher      User?    @relation("TeacherGroups", fields: [teacherId], references: [id])
+  teacher      User?       @relation("TeacherGroups", fields: [teacherId], references: [id])
   supervisorId Int?
-  supervisor   User?    @relation("SupervisorGroups", fields: [supervisorId], references: [id])
+  supervisor   User?       @relation("SupervisorGroups", fields: [supervisorId], references: [id])
   lieu         String?
   statut       GroupStatut @default(INSCRIPTION)
   format       GroupFormat @default(OFFLINE)
   type         GroupType   @default(GROUPE)
-  createdAt    DateTime @default(now())
+  createdAt    DateTime    @default(now())
 
   enrollments  Enrollment[]
-  tasks Task[]
+  courses      Course[]     @relation("CourseGroup")
+  tasks        Task[]       @relation("TaskGroup")
 }
 
 enum GroupStatut {
@@ -147,21 +148,39 @@ enum AttStatut {
   ABSENT
   EXCUSE
 }
+
 model Homework {
-  id          Int      @id @default(autoincrement())
-    taskId      Int
-    task        Task     @relation(fields: [taskId], references: [id])
-    studentId   Int
-    student     Student  @relation(fields: [studentId], references: [id])
-    contenu     String?
-    note        Float?
-    commentaire String?
-    statut      HomeworkStatut @default(RENDU)
-    createdAt   DateTime @default(now())
+  id          Int            @id @default(autoincrement())
+  taskId      Int
+  task        Task           @relation(fields: [taskId], references: [id])
+  studentId   Int
+  student     Student        @relation(fields: [studentId], references: [id])
+  contenu     String?
+  fichierUrl  String?
+  note        Float?
+  commentaire String?
+  statut      HomeworkStatut @default(RENDU)
+  createdAt   DateTime       @default(now())
 }
 
 enum HomeworkStatut {
   RENDU
   CORRIGE
   EN_ATTENTE
+}
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  titre     String
+  message   String
+  type      NotifType
+  lu        Boolean   @default(false)
+  createdAt DateTime  @default(now())
+}
+
+enum NotifType {
+  NOTE
+  DEVOIR
+  INFO
 }

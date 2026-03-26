@@ -10,10 +10,18 @@ router.get('/', protect, async (req, res) => {
     try {
         const groups = await prisma.group.findMany({
             include: {
-                course: true,
                 teacher: { select: { nom: true, prenom: true } },
                 supervisor: { select: { nom: true, prenom: true } },
-                _count: { select: { enrollments: true } }
+                _count: { select: { enrollments: true } },
+                enrollments: {
+                    include: {
+                        student: {
+                            include: {
+                                user: { select: { nom: true, prenom: true } }
+                            }
+                        }
+                    }
+                }
             }
         });
         res.json(groups);
@@ -28,13 +36,16 @@ router.get('/:id', protect, async (req, res) => {
         const group = await prisma.group.findUnique({
             where: { id: parseInt(req.params.id) },
             include: {
-                course: true,
                 teacher: { select: { nom: true, prenom: true, id: true } },
                 supervisor: { select: { nom: true, prenom: true, id: true } },
+                courses: true,
+                _count: { select: { enrollments: true } },
                 enrollments: {
                     include: {
                         student: {
-                            include: { user: { select: { nom: true, prenom: true } } }
+                            include: {
+                                user: { select: { nom: true, prenom: true, login: true } }
+                            }
                         }
                     }
                 }
@@ -49,14 +60,13 @@ router.get('/:id', protect, async (req, res) => {
 
 // POST créer un groupe
 router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    const { titre, courseId, teacherId, supervisorId, lieu, statut, format, type } = req.body;
+    const { titre, teacherId, supervisorId, lieu, statut, format, type } = req.body;
     try {
         const group = await prisma.group.create({
             data: {
                 titre,
-                courseId: courseId || null,
-                teacherId: teacherId || null,
-                supervisorId: supervisorId || null,
+                teacherId: teacherId ? parseInt(teacherId) : null,
+                supervisorId: supervisorId ? parseInt(supervisorId) : null,
                 lieu: lieu || null,
                 statut: statut || 'INSCRIPTION',
                 format: format || 'OFFLINE',
@@ -71,10 +81,19 @@ router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
 
 // PUT modifier un groupe
 router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const { titre, teacherId, supervisorId, lieu, statut, format, type } = req.body;
     try {
         const group = await prisma.group.update({
             where: { id: parseInt(req.params.id) },
-            data: req.body
+            data: {
+                titre,
+                teacherId: teacherId ? parseInt(teacherId) : null,
+                supervisorId: supervisorId ? parseInt(supervisorId) : null,
+                lieu: lieu || null,
+                statut: statut || 'INSCRIPTION',
+                format: format || 'OFFLINE',
+                type: type || 'GROUPE',
+            }
         });
         res.json(group);
     } catch (err) {
@@ -85,6 +104,7 @@ router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => 
 // DELETE supprimer un groupe
 router.delete('/:id', protect, allowRoles('ADMIN'), async (req, res) => {
     try {
+        await prisma.enrollment.deleteMany({ where: { groupId: parseInt(req.params.id) } });
         await prisma.group.delete({ where: { id: parseInt(req.params.id) } });
         res.json({ message: 'Groupe supprimé' });
     } catch (err) {

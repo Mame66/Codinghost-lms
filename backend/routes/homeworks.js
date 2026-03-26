@@ -80,8 +80,23 @@ router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => 
                 note: note ? parseFloat(note) : null,
                 commentaire,
                 statut: 'CORRIGE',
+            },
+            include: {
+                student: { include: { user: true } },
+                task: true,
             }
         });
+
+        // Créer une notification pour l'étudiant
+        await prisma.notification.create({
+            data: {
+                userId: homework.student.userId,
+                titre: '📝 Nouvelle note reçue',
+                message: `Vous avez reçu ${note}/20 pour : ${homework.task.titre}`,
+                type: 'NOTE',
+            }
+        });
+
         res.json(homework);
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
