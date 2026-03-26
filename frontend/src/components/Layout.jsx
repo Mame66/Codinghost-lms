@@ -1,5 +1,6 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
+import Notifications from "../pages/Notifications";
 
 const NAV_ITEMS = {
     ADMIN: [
@@ -25,6 +26,8 @@ const NAV_ITEMS = {
     ],
     STUDENT: [
         { icon: '📚', label: 'Mon cours', path: '/course' },
+        { icon: '✏️', label: 'Mes devoirs', path: '/my-homeworks' },
+        { icon: '🏆', label: 'Mes notes', path: '/my-grades' },
     ],
 };
 
@@ -85,6 +88,7 @@ export default function Layout({ children }) {
                 <div style={styles.topbar}>
                     <div style={styles.tbTitle}>CodingHost</div>
                     <div style={styles.tbSp} />
+                    <Notifications />
                     <div style={styles.tbUser}>
                         <div style={styles.tbAv}>👤</div>
                         <span>{user?.prenom} {user?.nom}</span>

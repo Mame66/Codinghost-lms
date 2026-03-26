@@ -8,6 +8,8 @@ import Students from "./pages/Students";
 import Course from "./pages/Course";
 import MyCourses from "./pages/MyCourses";
 import Homeworks from "./pages/Homeworks";
+import MyHomeworks from "./pages/Homeworks";
+import MyGrades from "./pages/MyGrades";
 
 const PrivateRoute = ({ children }) => {
     const { user, loading } = useAuth();
@@ -54,6 +56,16 @@ function AppRoutes() {
                     <Homeworks />
                 </PrivateRoute>
             } />
+            <Route path="/my-homeworks" element={
+                <PrivateRoute>
+                    <MyHomeworks />
+                </PrivateRoute>}
+            />
+            <Route path="/my-grades" element={
+                <PrivateRoute>
+                    <MyGrades />
+                </PrivateRoute>}
+            />
             <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
     );
