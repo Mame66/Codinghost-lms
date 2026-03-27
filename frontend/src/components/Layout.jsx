@@ -26,7 +26,6 @@ const NAV_ITEMS = {
     ],
     STUDENT: [
         { icon: '📚', label: 'Mon cours', path: '/course' },
-        { icon: '✏️', label: 'Mes devoirs', path: '/my-homeworks' },
         { icon: '🏆', label: 'Mes notes', path: '/my-grades' },
     ],
 };
