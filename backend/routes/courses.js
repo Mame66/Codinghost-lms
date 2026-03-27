@@ -158,19 +158,57 @@ router.put('/chapters/:chapterId/toggle', protect, allowRoles('ADMIN', 'TEACHER'
 
 // POST ajouter une tâche
 router.post('/chapters/:chapterId/tasks', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    const { titre, type, contenuUrl, ordre, groupId } = req.body;
+    const { titre, type, contenuUrl, ordre, description } = req.body;
     try {
         const task = await prisma.task.create({
             data: {
                 chapterId: parseInt(req.params.chapterId),
                 titre,
                 type: type || 'SLIDE',
-                contenuUrl: contenuUrl || null,
+                contenuUrl: contenuUrl || description || null,
                 ordre: ordre || 1,
                 locked: false,
-                groupId: groupId ? parseInt(groupId) : null,
             }
         });
+
+        // Notifier les étudiants du groupe si c'est un devoir ou QCM
+        if (type === 'DEVOIR' || type === 'QCM') {
+            try {
+                const chapter = await prisma.chapter.findUnique({
+                    where: { id: parseInt(req.params.chapterId) },
+                    include: {
+                        course: {
+                            include: {
+                                group: {
+                                    include: {
+                                        enrollments: {
+                                            include: { student: { include: { user: true } } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                if (chapter?.course?.group?.enrollments) {
+                    const typeLabel = type === 'QCM' ? '✅ Nouveau QCM' : '📁 Nouveau devoir';
+                    for (const enrollment of chapter.course.group.enrollments) {
+                        await prisma.notification.create({
+                            data: {
+                                userId: enrollment.student.userId,
+                                titre: typeLabel,
+                                message: `${titre} — ${chapter.course.titre}`,
+                                type: 'DEVOIR',
+                            }
+                        });
+                    }
+                }
+            } catch (notifErr) {
+                console.error('Erreur notification:', notifErr.message);
+            }
+        }
+
         res.status(201).json(task);
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
@@ -253,6 +291,40 @@ router.delete('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) 
         await prisma.chapter.deleteMany({ where: { courseId: course.id } });
         await prisma.course.delete({ where: { id: course.id } });
         res.json({ message: 'Cours supprimé' });
+    } catch (err) {
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+// POST créer questions QCM pour une tâche
+router.post('/tasks/:taskId/questions', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const { questions } = req.body;
+    try {
+        await prisma.qcmQuestion.deleteMany({
+            where: { taskId: parseInt(req.params.taskId) }
+        });
+        const created = await prisma.qcmQuestion.createMany({
+            data: questions.map((q, i) => ({
+                taskId: parseInt(req.params.taskId),
+                question: q.question,
+                options: q.options,
+                correct: q.correct,
+                ordre: i + 1,
+            }))
+        });
+        res.json({ message: 'Questions créées', count: created.count });
+    } catch (err) {
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+
+// GET questions d'une tâche QCM
+router.get('/tasks/:taskId/questions', protect, async (req, res) => {
+    try {
+        const questions = await prisma.qcmQuestion.findMany({
+            where: { taskId: parseInt(req.params.taskId) },
+            orderBy: { ordre: 'asc' }
+        });
+        res.json(questions);
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }

@@ -77,13 +77,15 @@ model Task {
   contenuUrl String?
   ordre      Int
   locked     Boolean  @default(false)
+  questions  QcmQuestion[]
 
   homeworks  Homework[]
 }
 
 enum TaskType {
   SLIDE
-  EXERCISE
+    QCM
+    DEVOIR
 }
 
 model Group {
@@ -161,6 +163,9 @@ model Homework {
   commentaire String?
   statut      HomeworkStatut @default(RENDU)
   createdAt   DateTime       @default(now())
+  lienRendu   String?
+  files       HomeworkFile[]
+  qcmAnswers  Json?
 }
 
 enum HomeworkStatut {
@@ -183,4 +188,23 @@ enum NotifType {
   NOTE
   DEVOIR
   INFO
+}
+model QcmQuestion {
+  id       Int          @id @default(autoincrement())
+  taskId   Int
+  task     Task         @relation(fields: [taskId], references: [id])
+  question String
+  options  String[]
+  correct  Int
+  ordre    Int          @default(1)
+}
+
+model HomeworkFile {
+  id         Int      @id @default(autoincrement())
+  homeworkId Int
+  homework   Homework @relation(fields: [homeworkId], references: [id])
+  fileName   String
+  fileUrl    String
+  fileType   String
+  createdAt  DateTime @default(now())
 }
