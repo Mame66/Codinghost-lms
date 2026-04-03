@@ -1,114 +1,185 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
     const { user } = useAuth();
-    const [stats, setStats] = useState({
-        students: 0,
-        groups: 0,
-        teachers: 0,
-    });
+    const navigate = useNavigate();
+    const [stats, setStats] = useState(null);
+    const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const [studentsRes, groupsRes] = await Promise.all([
-                    api.get('/students'),
-                    api.get('/groups'),
-                ]);
-                setStats({
-                    students: studentsRes.data.length,
-                    groups: groupsRes.data.length,
-                    teachers: 0,
-                });
-            } catch (err) {
-                console.error(err);
-            }
-        };
-        fetchStats();
-    }, []);
+    useEffect(() => { fetchStats(); }, []);
+
+    const fetchStats = async () => {
+        try {
+            const res = await api.get('/stats');
+            setStats(res.data);
+        } catch (err) { console.error(err); }
+        setLoading(false);
+    };
+
+    const typeConfig = {
+        SLIDE: { icon: '📊', color: '#5B2EE8', bg: '#EDE8FF' },
+        QCM: { icon: '✅', color: '#008060', bg: '#ECFDF5' },
+        DEVOIR: { icon: '📁', color: '#CC3300', bg: '#FFF0EB' },
+        EXERCISE: { icon: '✏️', color: '#CC3300', bg: '#FFF0EB' },
+    };
+
+    if (loading) return (
+        <div style={{ textAlign: 'center', padding: '60px', color: '#6B7280' }}>
+            Chargement...
+        </div>
+    );
+
+    const tauxPaiement = stats?.totalRevenue > 0
+        ? Math.round((stats.paidRevenue / stats.totalRevenue) * 100)
+        : 0;
 
     const cards = [
-        { icon: '👥', label: 'Étudiants actifs', value: stats.students, color: '#EDE8FF', trend: '+8%' },
-        { icon: '🏫', label: 'Groupes actifs', value: stats.groups, color: '#FFF0EB', trend: '+3' },
-        { icon: '👩‍🏫', label: 'Enseignants', value: stats.teachers, color: '#ECFDF5', trend: null },
-        { icon: '💰', label: 'Revenus DA (mois)', value: '610K', color: '#FFFBEB', trend: '+22%' },
+        { icon: '👥', label: 'Étudiants', value: stats?.totalStudents || 0, color: '#EDE8FF', trend: null, path: '/students' },
+        { icon: '🏫', label: 'Groupes', value: stats?.totalGroups || 0, color: '#FFF0EB', trend: null, path: '/groups' },
+        { icon: '👩‍🏫', label: 'Enseignants', value: stats?.totalTeachers || 0, color: '#ECFDF5', trend: null, path: null },
+        { icon: '📚', label: 'Cours', value: stats?.totalCourses || 0, color: '#FFFBEB', trend: null, path: '/my-courses' },
+        { icon: '✏️', label: 'Devoirs reçus', value: stats?.totalHomeworks || 0, color: '#EDE8FF', trend: null, path: '/homeworks' },
+        { icon: '⏳', label: 'À corriger', value: stats?.pendingHomeworks || 0, color: '#FFF0EB', trend: stats?.pendingHomeworks > 0 ? '!' : null, path: '/homeworks' },
+        { icon: '💰', label: 'Total facturé', value: `${(stats?.totalRevenue || 0).toLocaleString()} DA`, color: '#ECFDF5', trend: null, path: '/payments' },
+        { icon: '✅', label: 'Total reçu', value: `${(stats?.paidRevenue || 0).toLocaleString()} DA`, color: '#FFFBEB', trend: `${tauxPaiement}%`, path: '/payments' },
     ];
 
     return (
         <div>
-            <div style={styles.ph}>
-                <h1 style={styles.h1}>📊 Tableau de bord</h1>
-                <span style={styles.welcome}>Bonjour, {user?.prenom} 👋</span>
+            {/* Welcome */}
+            <div style={s.welcomeBar}>
+                <div>
+                    <div style={s.welcomeTitle}>
+                        Bonjour, {user?.prenom} 👋
+                    </div>
+                    <div style={s.welcomeSub}>
+                        {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                    </div>
+                </div>
+                {stats?.pendingHomeworks > 0 && (
+                    <div style={s.alertBadge} onClick={() => navigate('/homeworks')}>
+                        ⚠️ {stats.pendingHomeworks} devoir(s) en attente de correction
+                    </div>
+                )}
             </div>
 
-            {/* Stats cards */}
-            <div style={styles.grid}>
+            {/* Stats grid */}
+            <div style={s.grid}>
                 {cards.map((card, i) => (
-                    <div key={i} style={styles.card}>
-                        <div style={styles.cardTop}>
-                            <div style={{ ...styles.cardIcon, background: card.color }}>
-                                {card.icon}
-                            </div>
+                    <div key={i} style={{ ...s.card, cursor: card.path ? 'pointer' : 'default' }}
+                         onClick={() => card.path && navigate(card.path)}>
+                        <div style={s.cardTop}>
+                            <div style={{ ...s.cardIcon, background: card.color }}>{card.icon}</div>
                             {card.trend && (
-                                <div style={styles.trend}>{card.trend}</div>
+                                <div style={{
+                                    ...s.trend,
+                                    background: card.trend === '!' ? 'rgba(255,92,53,0.12)' : 'rgba(0,196,140,0.12)',
+                                    color: card.trend === '!' ? '#CC3300' : '#008060',
+                                }}>
+                                    {card.trend === '!' ? '🔴 Urgent' : card.trend}
+                                </div>
                             )}
                         </div>
-                        <div style={styles.cardValue}>{card.value}</div>
-                        <div style={styles.cardLabel}>{card.label}</div>
+                        <div style={s.cardVal}>{card.value}</div>
+                        <div style={s.cardLbl}>{card.label}</div>
                     </div>
                 ))}
             </div>
 
             {/* Bottom row */}
-            <div style={styles.row2}>
-                {/* Chart */}
-                <div style={styles.box}>
-                    <div style={styles.boxHeader}>
-                        <span style={styles.boxTitle}>📈 Inscriptions (6 mois)</span>
+            <div style={s.row2}>
+                {/* Recent homeworks */}
+                <div style={s.box}>
+                    <div style={s.bh}>
+                        <span style={s.bt}>📥 Derniers devoirs reçus</span>
+                        <button style={s.linkBtn} onClick={() => navigate('/homeworks')}>
+                            Voir tout →
+                        </button>
                     </div>
-                    <div style={styles.chart}>
-                        {[55, 42, 70, 60, 85, 100].map((h, i) => (
-                            <div key={i} style={styles.barWrap}>
-                                <div style={{
-                                    ...styles.bar,
-                                    height: `${h}%`,
-                                    background: i === 5
-                                        ? 'linear-gradient(180deg, #FF5C35, rgba(255,92,53,0.3))'
-                                        : 'linear-gradient(180deg, #5B2EE8, rgba(91,46,232,0.3))',
-                                }} />
-                                <span style={styles.barLabel}>
-                  {['Oct','Nov','Déc','Jan','Fév','Mar'][i]}
-                </span>
-                            </div>
-                        ))}
-                    </div>
+                    {!stats?.recentHomeworks?.length ? (
+                        <div style={s.boxEmpty}>Aucun devoir reçu</div>
+                    ) : (
+                        stats.recentHomeworks.map(hw => {
+                            const tc = typeConfig[hw.task?.type] || typeConfig.DEVOIR;
+                            return (
+                                <div key={hw.id} style={s.actItem}>
+                                    <div style={{ ...s.actIcon, background: tc.bg, color: tc.color }}>
+                                        {tc.icon}
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={s.actTitle}>
+                                            {hw.student?.user?.prenom} {hw.student?.user?.nom}
+                                        </div>
+                                        <div style={s.actSub}>{hw.task?.titre}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                        <div style={{
+                                            ...s.statusPill,
+                                            background: hw.statut === 'CORRIGE' ? 'rgba(0,196,140,0.12)' : 'rgba(255,184,0,0.15)',
+                                            color: hw.statut === 'CORRIGE' ? '#008060' : '#8B6200',
+                                        }}>
+                                            {hw.statut === 'CORRIGE' ? '✅' : '⏳'}
+                                        </div>
+                                        <div style={s.actTime}>
+                                            {new Date(hw.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
                 </div>
 
-                {/* Activity */}
-                <div style={styles.box}>
-                    <div style={styles.boxHeader}>
-                        <span style={styles.boxTitle}>⚡ Activité récente</span>
+                {/* Right column */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {/* Recent students */}
+                    <div style={s.box}>
+                        <div style={s.bh}>
+                            <span style={s.bt}>🎓 Derniers inscrits</span>
+                            <button style={s.linkBtn} onClick={() => navigate('/students')}>
+                                Voir tout →
+                            </button>
+                        </div>
+                        {!stats?.recentStudents?.length ? (
+                            <div style={s.boxEmpty}>Aucun étudiant</div>
+                        ) : (
+                            stats.recentStudents.map(st => (
+                                <div key={st.id} style={s.actItem}>
+                                    <div style={s.miniAvatar}>
+                                        {st.user?.prenom?.[0]}{st.user?.nom?.[0]}
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={s.actTitle}>{st.user?.prenom} {st.user?.nom}</div>
+                                        <div style={s.actSub}>
+                                            {st.enrollments?.[0]?.group?.titre || 'Sans groupe'}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
-                    <div style={styles.activityList}>
-                        {[
-                            { icon: '🎓', bg: '#EDE8FF', title: 'Nouvel étudiant inscrit', sub: 'Python Samedi 10H', time: '5 min' },
-                            { icon: '💳', bg: '#ECFDF5', title: 'Paiement reçu', sub: '3 000 DA · HTML/CSS', time: '18 min' },
-                            { icon: '📝', bg: '#FFF0EB', title: 'Cours soumis', sub: 'Prof. Karim · React JS', time: '1h' },
-                            { icon: '👥', bg: '#EDE8FF', title: 'Nouveau groupe créé', sub: '2025 Python Vendredi', time: '2h' },
-                        ].map((item, i) => (
-                            <div key={i} style={styles.actItem}>
-                                <div style={{ ...styles.actIcon, background: item.bg }}>
-                                    {item.icon}
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={styles.actTitle}>{item.title}</div>
-                                    <div style={styles.actSub}>{item.sub}</div>
-                                </div>
-                                <div style={styles.actTime}>{item.time}</div>
-                            </div>
-                        ))}
+
+                    {/* Quick actions */}
+                    <div style={s.box}>
+                        <div style={s.bh}><span style={s.bt}>⚡ Actions rapides</span></div>
+                        <div style={s.quickActions}>
+                            {[
+                                { icon: '➕', label: 'Ajouter étudiant', path: '/students', color: '#5B2EE8' },
+                                { icon: '🏫', label: 'Nouveau groupe', path: '/groups', color: '#008060' },
+                                { icon: '📚', label: 'Nouveau cours', path: '/my-courses', color: '#CC3300' },
+                                { icon: '📋', label: 'Marquer présences', path: '/attendance', color: '#8B6200' },
+                                { icon: '💰', label: 'Gérer paiements', path: '/payments', color: '#5B2EE8' },
+                                { icon: '✏️', label: 'Corriger devoirs', path: '/homeworks', color: '#CC3300' },
+                            ].map((action, i) => (
+                                <button key={i} style={s.qaBtn} onClick={() => navigate(action.path)}>
+                                    <span style={{ fontSize: '18px' }}>{action.icon}</span>
+                                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#1A1040' }}>{action.label}</span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -116,150 +187,31 @@ export default function Dashboard() {
     );
 }
 
-const styles = {
-    ph: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: '20px',
-    },
-    h1: {
-        fontFamily: 'sans-serif',
-        fontSize: '22px',
-        fontWeight: '800',
-        color: '#1A1040',
-    },
-    welcome: {
-        fontSize: '14px',
-        color: '#6B7280',
-        fontWeight: '600',
-    },
-    grid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: '16px',
-        marginBottom: '20px',
-    },
-    card: {
-        background: '#fff',
-        border: '1px solid #E5E0F5',
-        borderRadius: '14px',
-        padding: '20px',
-    },
-    cardTop: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: '12px',
-    },
-    cardIcon: {
-        width: '44px',
-        height: '44px',
-        borderRadius: '11px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '22px',
-    },
-    trend: {
-        fontSize: '11px',
-        fontWeight: '800',
-        padding: '3px 8px',
-        borderRadius: '50px',
-        background: 'rgba(0,196,140,0.1)',
-        color: '#008060',
-    },
-    cardValue: {
-        fontFamily: 'sans-serif',
-        fontSize: '30px',
-        fontWeight: '800',
-        color: '#1A1040',
-    },
-    cardLabel: {
-        fontSize: '12px',
-        color: '#6B7280',
-        fontWeight: '600',
-        marginTop: '2px',
-    },
-    row2: {
-        display: 'grid',
-        gridTemplateColumns: '2fr 1fr',
-        gap: '16px',
-    },
-    box: {
-        background: '#fff',
-        border: '1px solid #E5E0F5',
-        borderRadius: '14px',
-        overflow: 'hidden',
-    },
-    boxHeader: {
-        padding: '14px 18px',
-        borderBottom: '1px solid #E5E0F5',
-    },
-    boxTitle: {
-        fontFamily: 'sans-serif',
-        fontSize: '14px',
-        fontWeight: '700',
-        color: '#1A1040',
-    },
-    chart: {
-        display: 'flex',
-        alignItems: 'flex-end',
-        gap: '8px',
-        padding: '16px',
-        height: '140px',
-    },
-    barWrap: {
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '4px',
-        height: '100%',
-        justifyContent: 'flex-end',
-    },
-    bar: {
-        width: '100%',
-        borderRadius: '5px 5px 0 0',
-        minHeight: '8px',
-    },
-    barLabel: {
-        fontSize: '10px',
-        color: '#6B7280',
-        fontWeight: '600',
-    },
-    activityList: {
-        padding: '8px 0',
-    },
-    actItem: {
-        display: 'flex',
-        gap: '10px',
-        padding: '10px 18px',
-        borderBottom: '1px solid #E5E0F5',
-        alignItems: 'center',
-    },
-    actIcon: {
-        width: '34px',
-        height: '34px',
-        borderRadius: '9px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '16px',
-        flexShrink: 0,
-    },
-    actTitle: {
-        fontSize: '13px',
-        fontWeight: '700',
-        color: '#1A1040',
-    },
-    actSub: {
-        fontSize: '12px',
-        color: '#6B7280',
-    },
-    actTime: {
-        fontSize: '11px',
-        color: '#6B7280',
-        whiteSpace: 'nowrap',
-    },
+const s = {
+    welcomeBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' },
+    welcomeTitle: { fontFamily: 'sans-serif', fontSize: '24px', fontWeight: '800', color: '#1A1040' },
+    welcomeSub: { fontSize: '13px', color: '#6B7280', marginTop: '2px', fontWeight: '600', textTransform: 'capitalize' },
+    alertBadge: { background: 'rgba(255,92,53,0.12)', border: '1px solid rgba(255,92,53,0.3)', color: '#CC3300', padding: '10px 16px', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', transition: 'all 0.15s' },
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '14px', marginBottom: '20px' },
+    card: { background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', padding: '18px', transition: 'all 0.15s' },
+    cardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' },
+    cardIcon: { width: '42px', height: '42px', borderRadius: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' },
+    trend: { fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '50px' },
+    cardVal: { fontFamily: 'sans-serif', fontSize: '26px', fontWeight: '800', color: '#1A1040' },
+    cardLbl: { fontSize: '12px', color: '#6B7280', fontWeight: '600', marginTop: '2px' },
+    row2: { display: 'grid', gridTemplateColumns: '1fr 380px', gap: '16px' },
+    box: { background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', overflow: 'hidden' },
+    bh: { padding: '14px 18px', borderBottom: '1px solid #E5E0F5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+    bt: { fontFamily: 'sans-serif', fontSize: '14px', fontWeight: '700', color: '#1A1040' },
+    linkBtn: { fontSize: '12px', fontWeight: '700', color: '#5B2EE8', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' },
+    boxEmpty: { padding: '24px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' },
+    actItem: { display: 'flex', gap: '10px', padding: '11px 18px', borderBottom: '1px solid #F3F4F6', alignItems: 'center' },
+    actIcon: { width: '34px', height: '34px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0, fontWeight: '700' },
+    actTitle: { fontSize: '13px', fontWeight: '700', color: '#1A1040' },
+    actSub: { fontSize: '12px', color: '#6B7280' },
+    actTime: { fontSize: '11px', color: '#9CA3AF', marginTop: '2px' },
+    statusPill: { display: 'inline-flex', padding: '2px 8px', borderRadius: '50px', fontSize: '11px', fontWeight: '800' },
+    miniAvatar: { width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg,#5B2EE8,#A78BFF)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '800', flexShrink: 0 },
+    quickActions: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '14px' },
+    qaBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '12px 8px', background: '#F8F6FF', border: '1.5px solid #E5E0F5', borderRadius: '10px', cursor: 'pointer', transition: 'all 0.15s', fontFamily: 'inherit' },
 };

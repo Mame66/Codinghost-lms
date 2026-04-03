@@ -10,6 +10,9 @@ import MyCourses from "./pages/MyCourses";
 import Homeworks from "./pages/Homeworks";
 import MyHomeworks from "./pages/Homeworks";
 import MyGrades from "./pages/MyGrades";
+import Attendance from './pages/Attendance';
+import Payments from './pages/Payments';
+import Settings from './pages/Settings';
 
 const PrivateRoute = ({ children }) => {
     const { user, loading } = useAuth();
@@ -66,6 +69,18 @@ function AppRoutes() {
                     <MyGrades />
                 </PrivateRoute>}
             />
+            <Route path="/attendance" element={
+                <PrivateRoute>
+                    <Attendance />
+                </PrivateRoute>} />
+            <Route path="/payments" element={
+                <PrivateRoute>
+                    <Payments />
+                </PrivateRoute>} />
+            <Route path="/settings" element={
+                <PrivateRoute>
+                    <Settings />
+                </PrivateRoute>} />
             <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
     );

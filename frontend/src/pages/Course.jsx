@@ -10,18 +10,22 @@ export default function Course() {
     const [loading, setLoading] = useState(true);
     const [studentId, setStudentId] = useState(null);
 
+    // Homework status per task
+    const [homeworkStatus, setHomeworkStatus] = useState({});
+
     // QCM state
     const [qcmQuestions, setQcmQuestions] = useState([]);
     const [qcmAnswers, setQcmAnswers] = useState({});
     const [qcmSubmitted, setQcmSubmitted] = useState(false);
     const [qcmResult, setQcmResult] = useState(null);
+    const [existingQcm, setExistingQcm] = useState(null);
 
     // Devoir state
     const [showDevoir, setShowDevoir] = useState(false);
     const [devoirTask, setDevoirTask] = useState(null);
     const [devoirLien, setDevoirLien] = useState('');
-    const [devoirFile, setDevoirFile] = useState(null);
     const [devoirNote, setDevoirNote] = useState('');
+    const [existingDevoir, setExistingDevoir] = useState(null);
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => { fetchData(); }, []);
@@ -35,10 +39,20 @@ export default function Course() {
                 const first = res.data[0].chapters.find(c => !c.locked);
                 if (first) setSelectedChapter(first);
             }
+
             const meRes = await api.get('/auth/me');
             const studentsRes = await api.get('/students');
             const student = studentsRes.data.find(s => s.user?.login === meRes.data.login);
-            if (student) setStudentId(student.id);
+            if (student) {
+                setStudentId(student.id);
+                // Charger statut des devoirs
+                const hwRes = await api.get(`/homeworks/student/${student.id}`);
+                const statusMap = {};
+                hwRes.data.forEach(hw => {
+                    statusMap[hw.taskId] = hw;
+                });
+                setHomeworkStatus(statusMap);
+            }
         } catch (err) { console.error(err); }
         setLoading(false);
     };
@@ -50,34 +64,73 @@ export default function Course() {
         if (task.type === 'SLIDE') {
             setView('slide');
         } else if (task.type === 'QCM') {
-            // Charger les questions
-            try {
-                const res = await api.get(`/courses/tasks/${task.id}/questions`);
-                setQcmQuestions(res.data);
-                setQcmAnswers({});
-                setQcmSubmitted(false);
-                setQcmResult(null);
-                setView('qcm');
-            } catch (err) { alert('Erreur chargement QCM'); }
+            const existing = homeworkStatus[task.id];
+            if (existing?.qcmSoumis) {
+                // QCM déjà soumis — afficher les réponses
+                try {
+                    const qRes = await api.get(`/courses/tasks/${task.id}/questions`);
+                    setQcmQuestions(qRes.data);
+
+                    // Parser les réponses
+                    const answers = typeof existing.qcmAnswers === 'string'
+                        ? JSON.parse(existing.qcmAnswers)
+                        : existing.qcmAnswers || {};
+                    setQcmAnswers(answers);
+                    setQcmSubmitted(true);
+                    setExistingQcm(existing);
+
+                    // ✅ Recalculer le score correctement
+                    let correct = 0;
+                    qRes.data.forEach((q, i) => {
+                        const userAns = parseInt(answers[i]);
+                        if (!isNaN(userAns) && userAns === q.correct) correct++;
+                    });
+
+                    // ✅ Utiliser la note du devoir si elle existe
+                    const score = existing.note !== null && existing.note !== undefined
+                        ? existing.note
+                        : Math.round((correct / qRes.data.length) * 20);
+
+                    setQcmResult({
+                        correct,
+                        total: qRes.data.length,
+                        score,
+                    });
+                    setView('qcm');
+                } catch (err) { alert('Erreur chargement QCM'); }
+            } else {
+                // QCM pas encore soumis
+                try {
+                    const qRes = await api.get(`/courses/tasks/${task.id}/questions`);
+                    setQcmQuestions(qRes.data);
+                    setQcmAnswers({});
+                    setQcmSubmitted(false);
+                    setQcmResult(null);
+                    setExistingQcm(null);
+                    setView('qcm');
+                } catch (err) { alert('Erreur chargement QCM'); }
+            }
         } else if (task.type === 'DEVOIR') {
+            const existing = homeworkStatus[task.id];
             setDevoirTask(task);
-            setDevoirLien('');
-            setDevoirFile(null);
-            setDevoirNote('');
+            setExistingDevoir(existing || null);
+            setDevoirLien(existing?.lienRendu || '');
+            setDevoirNote(existing?.contenu || '');
             setShowDevoir(true);
         }
     };
 
-    // ===== SUBMIT QCM =====
+    // Submit QCM
     const submitQcm = async () => {
         if (Object.keys(qcmAnswers).length < qcmQuestions.length) {
             return alert('Répondez à toutes les questions avant de soumettre');
         }
+        if (!window.confirm('⚠️ Êtes-vous sûr ? Vous ne pourrez plus modifier vos réponses après soumission.')) return;
 
-        // Calculer le score
         let correct = 0;
         qcmQuestions.forEach((q, i) => {
-            if (qcmAnswers[i] === q.correct) correct++;
+            const userAns = parseInt(qcmAnswers[i]);
+            if (!isNaN(userAns) && userAns === q.correct) correct++;
         });
         const score = Math.round((correct / qcmQuestions.length) * 20);
 
@@ -85,21 +138,29 @@ export default function Course() {
             await api.post('/homeworks', {
                 taskId: activeTask.id,
                 studentId,
-                contenu: `QCM soumis - Score: ${correct}/${qcmQuestions.length}`,
+                contenu: `QCM soumis - Score: ${correct}/${qcmQuestions.length} - Note: ${score}/20`,
                 qcmAnswers: JSON.stringify(qcmAnswers),
+                qcmSoumis: true,
             });
             setQcmSubmitted(true);
             setQcmResult({ correct, total: qcmQuestions.length, score });
+
+            setHomeworkStatus(prev => ({
+                ...prev,
+                [activeTask.id]: {
+                    ...prev[activeTask.id],
+                    qcmSoumis: true,
+                    statut: 'RENDU',
+                    note: score,
+                }
+            }));
         } catch (err) {
             alert(err.response?.data?.message || 'Erreur soumission');
         }
     };
-
-    // ===== SUBMIT DEVOIR =====
+    // Submit Devoir
     const submitDevoir = async () => {
-        if (!devoirLien && !devoirFile && !devoirNote) {
-            return alert('Ajoutez un fichier, un lien ou une note');
-        }
+        if (!devoirLien && !devoirNote) return alert('Ajoutez un lien ou une réponse texte');
         setSubmitting(true);
         try {
             await api.post('/homeworks', {
@@ -110,6 +171,17 @@ export default function Course() {
             });
             alert('✅ Devoir soumis avec succès !');
             setShowDevoir(false);
+
+            // Mettre à jour statut local
+            setHomeworkStatus(prev => ({
+                ...prev,
+                [devoirTask.id]: {
+                    ...prev[devoirTask.id],
+                    statut: 'RENDU',
+                    lienRendu: devoirLien,
+                    contenu: devoirNote,
+                }
+            }));
         } catch (err) {
             alert(err.response?.data?.message || 'Erreur soumission');
         }
@@ -123,9 +195,11 @@ export default function Course() {
     if (courses.length === 0) return (
         <div style={{ textAlign: 'center', padding: '60px' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>📚</div>
-            <div style={{ fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '800', color: '#1A1040' }}>Aucun cours disponible</div>
+            <div style={{ fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '800', color: '#1A1040' }}>
+                Aucun cours disponible
+            </div>
             <div style={{ color: '#6B7280', marginTop: '8px', fontSize: '13px' }}>
-                Vous n'êtes pas encore assigné à un groupe ou votre enseignant n'a pas encore ajouté de cours.
+                Vous n'êtes pas encore assigné à un groupe ou votre enseignant n'a pas ajouté de cours.
             </div>
         </div>
     );
@@ -137,7 +211,11 @@ export default function Course() {
                 <button style={s.backBtn} onClick={() => setView('tasks')}>←</button>
                 <div style={s.slideSteps}>
                     {selectedChapter?.tasks.filter(t => !t.locked).map((t, i) => (
-                        <div key={t.id} style={{ ...s.stepCircle, background: t.id === activeTask?.id ? '#5B2EE8' : 'rgba(255,255,255,0.1)', color: t.id === activeTask?.id ? '#fff' : 'rgba(255,255,255,0.4)' }}>{i + 1}</div>
+                        <div key={t.id} style={{
+                            ...s.stepCircle,
+                            background: t.id === activeTask?.id ? '#5B2EE8' : 'rgba(255,255,255,0.1)',
+                            color: t.id === activeTask?.id ? '#fff' : 'rgba(255,255,255,0.4)',
+                        }}>{i + 1}</div>
                     ))}
                 </div>
                 <div style={s.slideUserBtn}>{selectedCourse?.titre}</div>
@@ -145,7 +223,9 @@ export default function Course() {
             <div style={s.slideMain}>
                 {activeTask?.contenuUrl ? (
                     <div style={s.slideFrameWrap}>
-                        <iframe style={s.slideFrame} src={activeTask.contenuUrl.replace('/edit', '/embed').replace('/pub', '/embed')} allowFullScreen title={activeTask.titre} />
+                        <iframe style={s.slideFrame}
+                                src={activeTask.contenuUrl.replace('/edit', '/embed').replace('/pub', '/embed')}
+                                allowFullScreen title={activeTask.titre} />
                     </div>
                 ) : (
                     <div style={s.slideCard}>
@@ -154,12 +234,14 @@ export default function Course() {
                             <h2 style={s.slideTitle}>{activeTask?.titre}</h2>
                             <p style={{ fontSize: '14px', color: '#6B7280' }}>Cours · {selectedCourse?.titre}</p>
                         </div>
-                        <div style={{ fontSize: '80px', marginLeft: '40px' }}>🐍</div>
+                        <div style={{ fontSize: '80px', marginLeft: '40px' }}>📚</div>
                     </div>
                 )}
                 <div style={s.slideControls}>
                     <button style={s.slideNavBtn}>‹</button>
-                    <span style={{ fontSize: '14px', fontWeight: '700', color: 'rgba(255,255,255,0.7)' }}>Présentation</span>
+                    <span style={{ fontSize: '14px', fontWeight: '700', color: 'rgba(255,255,255,0.7)' }}>
+            {activeTask?.titre}
+          </span>
                     <button style={s.slideNavBtn}>›</button>
                 </div>
                 <button style={s.nextBtn} onClick={() => setView('tasks')}>Suivant</button>
@@ -173,36 +255,93 @@ export default function Course() {
             <div style={s.qcmTb}>
                 <button style={s.backBtn} onClick={() => setView('tasks')}>←</button>
                 <div style={{ color: '#fff', fontWeight: '700', fontSize: '14px' }}>
-                    ✅ QCM — {activeTask?.titre}
+                    ✅ {activeTask?.titre}
                 </div>
-                <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '13px', position: 'absolute', right: '16px' }}>
-                    {Object.keys(qcmAnswers).length}/{qcmQuestions.length} répondu(s)
-                </div>
+                {!qcmSubmitted && (
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', position: 'absolute', right: '16px' }}>
+                        {Object.keys(qcmAnswers).length}/{qcmQuestions.length} répondu(s)
+                    </div>
+                )}
+                {qcmSubmitted && (
+                    <div style={{ position: 'absolute', right: '16px' }}>
+            <span style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', padding: '4px 12px', borderRadius: '50px', fontSize: '12px', fontWeight: '700' }}>
+              🔒 QCM soumis
+            </span>
+                    </div>
+                )}
             </div>
 
             <div style={s.qcmBody}>
                 {qcmSubmitted && qcmResult ? (
-                    // Résultat
-                    <div style={s.qcmResult}>
-                        <div style={{ fontSize: '64px', marginBottom: '16px' }}>
-                            {qcmResult.score >= 10 ? '🎉' : '😔'}
+                    // Résultat + voir les réponses
+                    <div>
+                        <div style={s.qcmResultCard}>
+                            <div style={{ fontSize: '64px', marginBottom: '16px' }}>
+                                {qcmResult.score >= 10 ? '🎉' : '😔'}
+                            </div>
+                            <div style={s.qcmResultTitle}>
+                                {qcmResult.score >= 10 ? 'Bravo !' : 'Continuez à pratiquer !'}
+                            </div>
+                            <div style={{ fontSize: '16px', color: '#6B7280', marginBottom: '12px' }}>
+                                {qcmResult.correct}/{qcmResult.total} bonnes réponses
+                            </div>
+                            <div style={{ ...s.qcmScoreBig, color: qcmResult.score >= 10 ? '#008060' : '#CC0033' }}>
+                                {qcmResult.score}/20
+                            </div>
+                            <div style={s.qcmLockNotice}>
+                                🔒 Ce QCM a été soumis — vous ne pouvez plus modifier vos réponses
+                            </div>
                         </div>
-                        <div style={s.qcmResultTitle}>
-                            {qcmResult.score >= 10 ? 'Bravo !' : 'Continuez à pratiquer !'}
+
+                        {/* Voir les réponses */}
+                        <div style={{ marginTop: '20px' }}>
+                            <div style={s.reviewTitle}>📋 Vos réponses :</div>
+                            {qcmQuestions.map((q, qi) => {
+                                const userAnswer = parseInt(qcmAnswers[qi]);
+                                const isCorrect = userAnswer === q.correct;
+                                return (
+                                    <div key={qi} style={s.reviewQuestion}>
+                                        <div style={s.reviewQNum}>Q{qi + 1}</div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={s.reviewQText}>{q.question}</div>
+                                            <div style={s.reviewOptions}>
+                                                {q.options.map((opt, oi) => (
+                                                    <div key={oi} style={{
+                                                        ...s.reviewOption,
+                                                        background: oi === q.correct ? 'rgba(0,196,140,0.1)'
+                                                            : oi === userAnswer && !isCorrect ? 'rgba(255,59,92,0.1)'
+                                                                : '#F8F6FF',
+                                                        border: `1.5px solid ${oi === q.correct ? '#00C48C'
+                                                            : oi === userAnswer && !isCorrect ? '#FF3B5C'
+                                                                : '#E5E0F5'}`,
+                                                    }}>
+                            <span style={{
+                                ...s.reviewOptLetter,
+                                background: oi === q.correct ? '#00C48C'
+                                    : oi === userAnswer && !isCorrect ? '#FF3B5C'
+                                        : '#E5E7EB',
+                                color: (oi === q.correct || (oi === userAnswer && !isCorrect)) ? '#fff' : '#6B7280',
+                            }}>
+                              {['A', 'B', 'C', 'D'][oi]}
+                            </span>
+                                                        <span style={{ fontSize: '13px', color: '#1A1040' }}>{opt}</span>
+                                                        {oi === q.correct && <span style={{ marginLeft: 'auto', color: '#008060', fontWeight: '800' }}>✓ Bonne réponse</span>}
+                                                        {oi === userAnswer && !isCorrect && <span style={{ marginLeft: 'auto', color: '#CC0033', fontWeight: '800' }}>✗ Votre réponse</span>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                        <div style={s.qcmResultScore}>
-                            {qcmResult.correct}/{qcmResult.total} bonnes réponses
+
+                        <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '40px', marginTop: '20px' }}>
+                            <button style={s.btnP} onClick={() => setView('tasks')}>← Retour au cours</button>
                         </div>
-                        <div style={{ ...s.qcmScoreBig, color: qcmResult.score >= 10 ? '#008060' : '#CC0033' }}>
-                            {qcmResult.score}/20
-                        </div>
-                        <p style={{ color: '#6B7280', fontSize: '13px', marginBottom: '24px' }}>
-                            Votre résultat a été envoyé à votre enseignant.
-                        </p>
-                        <button style={s.btnP} onClick={() => setView('tasks')}>← Retour au cours</button>
                     </div>
                 ) : (
-                    // Questions
+                    // Questions à répondre
                     <>
                         {qcmQuestions.map((q, qi) => (
                             <div key={qi} style={s.qcmQuestion}>
@@ -210,14 +349,11 @@ export default function Course() {
                                 <div style={s.qcmQText}>{q.question}</div>
                                 <div style={s.qcmOptions}>
                                     {q.options.map((opt, oi) => (
-                                        <div key={oi}
-                                             style={{
-                                                 ...s.qcmOption,
-                                                 border: qcmAnswers[qi] === oi ? '2px solid #5B2EE8' : '2px solid #E5E0F5',
-                                                 background: qcmAnswers[qi] === oi ? '#F5F2FF' : '#fff',
-                                             }}
-                                             onClick={() => setQcmAnswers({ ...qcmAnswers, [qi]: oi })}
-                                        >
+                                        <div key={oi} style={{
+                                            ...s.qcmOption,
+                                            border: qcmAnswers[qi] === oi ? '2px solid #5B2EE8' : '2px solid #E5E0F5',
+                                            background: qcmAnswers[qi] === oi ? '#F5F2FF' : '#fff',
+                                        }} onClick={() => setQcmAnswers({ ...qcmAnswers, [qi]: oi })}>
                                             <div style={{
                                                 ...s.qcmOptLetter,
                                                 background: qcmAnswers[qi] === oi ? '#5B2EE8' : '#F3F4F6',
@@ -234,7 +370,6 @@ export default function Course() {
                                 </div>
                             </div>
                         ))}
-
                         <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', paddingBottom: '40px' }}>
                             <button style={s.btnO2} onClick={() => setView('tasks')}>Annuler</button>
                             <button style={{
@@ -278,8 +413,14 @@ export default function Course() {
                                     ...s.chap,
                                     ...(chap.locked ? s.chapLocked : {}),
                                     ...(selectedChapter?.id === chap.id ? s.chapOn : {}),
-                                }} onClick={() => { if (!chap.locked) { setSelectedChapter(chap); setSelectedCourse(course); } }}>
-                                    <div style={{ ...s.chNum, ...(selectedChapter?.id === chap.id ? s.chNumOn : {}), ...(chap.locked ? s.chNumLocked : {}) }}>
+                                }} onClick={() => {
+                                    if (!chap.locked) { setSelectedChapter(chap); setSelectedCourse(course); }
+                                }}>
+                                    <div style={{
+                                        ...s.chNum,
+                                        ...(selectedChapter?.id === chap.id ? s.chNumOn : {}),
+                                        ...(chap.locked ? s.chNumLocked : {}),
+                                    }}>
                                         {chap.locked ? '🔒' : i + 1}
                                     </div>
                                     <div style={{ fontSize: '13px', fontWeight: '700', color: chap.locked ? '#9CA3AF' : '#1A1040', lineHeight: 1.3 }}>
@@ -299,29 +440,54 @@ export default function Course() {
                         <div style={s.lcTitle}>{selectedChapter.titre}</div>
                         <div style={s.lcTabs}>
                             <div style={{ ...s.lct, ...s.lctOn }}>Toutes les tâches</div>
-                            <div style={s.lct}>Incomplètes {selectedChapter.tasks.filter(t => !t.locked).length}</div>
+                            <div style={s.lct}>
+                                Incomplètes {selectedChapter.tasks.filter(t => !t.locked && !homeworkStatus[t.id]).length}
+                            </div>
                         </div>
+
                         <div style={{ marginBottom: '28px' }}>
-                            <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px', color: '#6B7280', marginBottom: '14px' }}>TÂCHES</div>
                             <div style={s.taskRow}>
-                                {selectedChapter.tasks.map((task, i) => {
+                                {[...selectedChapter.tasks].sort((a, b) => a.ordre - b.ordre).map((task, i) => {
                                     const tc = typeConfig[task.type] || typeConfig.SLIDE;
+                                    const hw = homeworkStatus[task.id];
+                                    const isRendu = hw?.statut === 'RENDU' || hw?.statut === 'CORRIGE';
+                                    const isQcmSoumis = hw?.qcmSoumis;
+
                                     return (
                                         <div key={task.id} style={s.taskItem} onClick={() => openTask(task)}>
                                             <div style={{
                                                 ...s.taskCircle,
-                                                background: task.locked ? '#D1D5DB' : `linear-gradient(135deg,${tc.color},${tc.color}99)`,
+                                                background: task.locked ? '#D1D5DB'
+                                                    : isRendu || isQcmSoumis ? '#00C48C'
+                                                        : `linear-gradient(135deg,${tc.color},${tc.color}99)`,
                                                 cursor: task.locked ? 'not-allowed' : 'pointer',
                                                 boxShadow: task.locked ? 'none' : `0 4px 16px ${tc.color}44`,
                                             }}>
-                                                {task.locked ? '🔒' : tc.icon}
+                                                {task.locked ? '🔒'
+                                                    : isRendu || isQcmSoumis ? '✅'
+                                                        : tc.icon}
                                             </div>
                                             <div style={{ fontSize: '12px', fontWeight: '600', color: task.locked ? '#9CA3AF' : '#1A1040', textAlign: 'center', maxWidth: '88px', lineHeight: 1.3 }}>
                                                 {task.titre}
                                             </div>
-                                            <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: '600' }}>
-                                                {task.locked ? '🔒 Verrouillé' : task.type === 'SLIDE' ? '📊 Slide' : task.type === 'QCM' ? '✅ QCM' : '📁 Devoir'}
+                                            <div style={{ fontSize: '11px', fontWeight: '700', textAlign: 'center' }}>
+                                                {task.locked ? (
+                                                    <span style={{ color: '#9CA3AF' }}>🔒 Verrouillé</span>
+                                                ) : isQcmSoumis ? (
+                                                    <span style={{ color: '#008060' }}>✅ Soumis</span>
+                                                ) : isRendu ? (
+                                                    <span style={{ color: '#008060' }}>✅ Rendu</span>
+                                                ) : (
+                                                    <span style={{ color: '#6B7280' }}>
+                            {task.type === 'SLIDE' ? '📊 Slide' : task.type === 'QCM' ? '✅ QCM' : '📁 Devoir'}
+                          </span>
+                                                )}
                                             </div>
+                                            {hw?.note !== null && hw?.note !== undefined && (
+                                                <div style={{ fontSize: '11px', color: '#5B2EE8', fontWeight: '800' }}>
+                                                    {hw.note}/20
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })}
@@ -329,7 +495,9 @@ export default function Course() {
                         </div>
                     </>
                 ) : (
-                    <div style={{ textAlign: 'center', padding: '60px', color: '#6B7280' }}>Sélectionnez un chapitre</div>
+                    <div style={{ textAlign: 'center', padding: '60px', color: '#6B7280' }}>
+                        Sélectionnez un chapitre
+                    </div>
                 )}
             </div>
 
@@ -340,15 +508,46 @@ export default function Course() {
                         <h2 style={hw.title}>📁 {devoirTask?.titre}</h2>
                         <span style={hw.badge}>📁 Devoir à rendre</span>
 
+                        {/* Sujet */}
                         {devoirTask?.contenuUrl && (
                             <div style={hw.sujet}>
                                 <div style={hw.sujetTitle}>📋 Sujet du devoir :</div>
                                 <div style={hw.sujetText}>{devoirTask.contenuUrl}</div>
                             </div>
                         )}
+                        {devoirTask?.description && (
+                            <div style={hw.sujet}>
+                                <div style={hw.sujetTitle}>📋 Instructions :</div>
+                                <div style={hw.sujetText}>{devoirTask.description}</div>
+                            </div>
+                        )}
+
+                        {/* Si déjà rendu */}
+                        {existingDevoir && existingDevoir.statut !== 'EN_ATTENTE' && (
+                            <div style={hw.alreadyRendu}>
+                                <div style={{ fontWeight: '700', color: '#008060', marginBottom: '6px' }}>
+                                    ✅ Devoir déjà rendu
+                                </div>
+                                {existingDevoir.lienRendu && (
+                                    <div style={{ fontSize: '13px', color: '#6B7280' }}>
+                                        Lien : <a href={existingDevoir.lienRendu} target="_blank" rel="noreferrer" style={{ color: '#5B2EE8' }}>
+                                        {existingDevoir.lienRendu}
+                                    </a>
+                                    </div>
+                                )}
+                                {existingDevoir.note !== null && existingDevoir.note !== undefined && (
+                                    <div style={{ fontSize: '14px', fontWeight: '800', color: '#5B2EE8', marginTop: '6px' }}>
+                                        Note : {existingDevoir.note}/20
+                                    </div>
+                                )}
+                                <div style={{ fontSize: '12px', color: '#8B6200', marginTop: '8px', fontStyle: 'italic' }}>
+                                    💡 Vous pouvez soumettre un nouveau lien pour remplacer votre travail
+                                </div>
+                            </div>
+                        )}
 
                         <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px', lineHeight: 1.6 }}>
-                            Rendez votre travail en ajoutant un lien (Google Drive, etc.) ou en collant votre réponse.
+                            Partagez votre travail via un lien Google Drive ou répondez en texte.
                         </p>
 
                         <div style={hw.fg}>
@@ -356,7 +555,7 @@ export default function Course() {
                             <input style={hw.fi} type="url" placeholder="https://drive.google.com/..."
                                    value={devoirLien} onChange={e => setDevoirLien(e.target.value)} />
                             <span style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px' }}>
-                💡 Partagez votre fichier PDF/DOC/ZIP via Google Drive et collez le lien
+                💡 Partagez votre fichier PDF/DOC/ZIP via Google Drive
               </span>
                         </div>
 
@@ -369,10 +568,10 @@ export default function Course() {
                         </div>
 
                         <div style={hw.foot}>
-                            <button style={hw.btnO} onClick={() => setShowDevoir(false)}>Annuler</button>
+                            <button style={hw.btnO} onClick={() => setShowDevoir(false)}>Fermer</button>
                             <button style={{ ...hw.btnP, opacity: submitting ? 0.7 : 1 }}
                                     onClick={submitDevoir} disabled={submitting}>
-                                {submitting ? 'Envoi...' : '📤 Rendre le devoir'}
+                                {submitting ? 'Envoi...' : existingDevoir?.statut === 'RENDU' ? '🔄 Remplacer le devoir' : '📤 Rendre le devoir'}
                             </button>
                         </div>
                     </div>
@@ -422,16 +621,23 @@ const s = {
     qcmWrap: { position: 'fixed', inset: 0, background: '#F8F6FF', display: 'flex', flexDirection: 'column', zIndex: 200 },
     qcmTb: { height: '52px', background: '#5B2EE8', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', position: 'relative', paddingLeft: '60px' },
     qcmBody: { flex: 1, overflowY: 'auto', padding: '32px 20px', maxWidth: '700px', margin: '0 auto', width: '100%' },
+    qcmResultCard: { background: '#fff', borderRadius: '16px', padding: '48px', textAlign: 'center', border: '1px solid #E5E0F5', marginBottom: '20px' },
+    qcmResultTitle: { fontFamily: 'sans-serif', fontSize: '28px', fontWeight: '800', color: '#1A1040', marginBottom: '8px' },
+    qcmScoreBig: { fontFamily: 'sans-serif', fontSize: '64px', fontWeight: '900', marginBottom: '16px' },
+    qcmLockNotice: { background: '#F8F6FF', border: '1px solid #E5E0F5', borderRadius: '8px', padding: '10px 16px', fontSize: '13px', color: '#6B7280', fontWeight: '600' },
+    reviewTitle: { fontFamily: 'sans-serif', fontSize: '16px', fontWeight: '800', color: '#1A1040', marginBottom: '16px' },
+    reviewQuestion: { background: '#fff', borderRadius: '12px', padding: '20px', marginBottom: '14px', border: '1px solid #E5E0F5', display: 'flex', gap: '12px' },
+    reviewQNum: { width: '28px', height: '28px', background: '#5B2EE8', color: '#fff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '12px', flexShrink: 0 },
+    reviewQText: { fontFamily: 'sans-serif', fontSize: '15px', fontWeight: '700', color: '#1A1040', marginBottom: '12px' },
+    reviewOptions: { display: 'flex', flexDirection: 'column', gap: '8px' },
+    reviewOption: { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', borderRadius: '8px' },
+    reviewOptLetter: { width: '26px', height: '26px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '11px', flexShrink: 0 },
     qcmQuestion: { background: '#fff', borderRadius: '14px', padding: '24px', marginBottom: '20px', border: '1px solid #E5E0F5' },
     qcmQNum: { fontSize: '11px', fontWeight: '800', color: '#5B2EE8', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' },
     qcmQText: { fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '700', color: '#1A1040', marginBottom: '20px', lineHeight: 1.4 },
     qcmOptions: { display: 'flex', flexDirection: 'column', gap: '10px' },
     qcmOption: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '10px', cursor: 'pointer', transition: 'all 0.15s' },
     qcmOptLetter: { width: '32px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '13px', flexShrink: 0 },
-    qcmResult: { background: '#fff', borderRadius: '16px', padding: '48px', textAlign: 'center', border: '1px solid #E5E0F5' },
-    qcmResultTitle: { fontFamily: 'sans-serif', fontSize: '28px', fontWeight: '800', color: '#1A1040', marginBottom: '8px' },
-    qcmResultScore: { fontSize: '16px', color: '#6B7280', marginBottom: '16px' },
-    qcmScoreBig: { fontFamily: 'sans-serif', fontSize: '64px', fontWeight: '900', marginBottom: '16px' },
     btnP: { padding: '12px 28px', background: '#5B2EE8', border: 'none', borderRadius: '10px', color: '#fff', fontWeight: '700', fontSize: '14px', cursor: 'pointer' },
     btnO2: { padding: '12px 24px', background: 'transparent', border: '1.5px solid #E5E0F5', borderRadius: '10px', color: '#1A1040', fontWeight: '700', fontSize: '14px', cursor: 'pointer' },
     btnP2: { padding: '12px 28px', background: '#5B2EE8', border: 'none', borderRadius: '10px', color: '#fff', fontWeight: '700', fontSize: '14px', cursor: 'pointer' },
@@ -445,6 +651,7 @@ const hw = {
     sujet: { background: '#FFFBEB', border: '1px solid #FEF3C7', borderRadius: '10px', padding: '14px', marginBottom: '16px' },
     sujetTitle: { fontSize: '12px', fontWeight: '800', color: '#8B6200', marginBottom: '6px' },
     sujetText: { fontSize: '13px', color: '#1A1040', lineHeight: 1.6 },
+    alreadyRendu: { background: '#ECFDF5', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '14px', marginBottom: '16px' },
     divider: { textAlign: 'center', color: '#9CA3AF', fontSize: '13px', fontWeight: '600', margin: '12px 0' },
     fg: { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' },
     fl: { fontSize: '11px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' },
