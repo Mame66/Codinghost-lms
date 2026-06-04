@@ -13,6 +13,8 @@ import MyGrades from "./pages/MyGrades";
 import Attendance from './pages/Attendance';
 import Payments from './pages/Payments';
 import Settings from './pages/Settings';
+import Invoices from "./pages/Invoices";
+import Billing from "./pages/Billing";
 
 const PrivateRoute = ({ children }) => {
     const { user, loading } = useAuth();
@@ -72,15 +74,23 @@ function AppRoutes() {
             <Route path="/attendance" element={
                 <PrivateRoute>
                     <Attendance />
-                </PrivateRoute>} />
+                </PrivateRoute>}
+            />
             <Route path="/payments" element={
                 <PrivateRoute>
                     <Payments />
-                </PrivateRoute>} />
+                </PrivateRoute>}
+            />
             <Route path="/settings" element={
                 <PrivateRoute>
                     <Settings />
-                </PrivateRoute>} />
+                </PrivateRoute>}
+            />
+            <Route path="/billing" element={
+                <PrivateRoute>
+                    <Billing />
+                </PrivateRoute>}
+            />
             <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
     );
