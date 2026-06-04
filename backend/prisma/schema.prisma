@@ -43,6 +43,7 @@ model Student {
   enrollments Enrollment[]
   homeworks   Homework[]
   payments    Payment[]
+  contracts  Contract[]
 }
 
 model Course {
@@ -51,9 +52,9 @@ model Course {
   description   String?
   niveau        String?
   lockedByAdmin Boolean  @default(false)
-  createdBy     String?
+  createdBy     Int?
   createdAt     DateTime @default(now())
-
+  modules      Module[]
   chapters     Chapter[]
   courseGroups CourseGroup[]
 }
@@ -75,20 +76,37 @@ model Chapter {
   titre    String
   ordre    Int
   locked   Boolean @default(false)
+  moduleId    Int?
+  module      Module?     @relation(fields: [moduleId], references: [id], onDelete: SetNull)
 
   tasks    Task[]
 }
+model Module {
+  id          Int       @id @default(autoincrement())
+  titre       String
+  description String?
+  ordre       Int       @default(0)
+  locked      Boolean   @default(false)
+  courseId    Int
+  course      Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  chapters    Chapter[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
 
 model Task {
-  id          Int      @id @default(autoincrement())
-  chapterId   Int
-  chapter     Chapter  @relation(fields: [chapterId], references: [id])
-  titre       String
-  type        TaskType
-  contenuUrl  String?
-  description String?
-  ordre       Int
-  locked      Boolean  @default(false)
+  id             Int      @id @default(autoincrement())
+  chapterId      Int
+  chapter        Chapter  @relation(fields: [chapterId], references: [id])
+  titre          String
+  type           TaskType
+  contenuUrl     String?
+  description    String?
+  scriptContent  String?
+  scriptLanguage String?
+  ordre          Int
+  locked         Boolean  @default(false)
+  lockedByAdmin  Boolean  @default(false)
 
   questions QcmQuestion[]
   homeworks Homework[]
@@ -98,6 +116,7 @@ enum TaskType {
   SLIDE
   QCM
   DEVOIR
+  SCRIPT
 }
 
 model Group {
@@ -112,10 +131,12 @@ model Group {
   format       GroupFormat @default(OFFLINE)
   type         GroupType   @default(GROUPE)
   createdAt    DateTime    @default(now())
+  ville  String?
 
   enrollments  Enrollment[]
   courseGroups CourseGroup[]
   payments     Payment[]
+  contracts  Contract[]
 }
 
 enum GroupStatut {
@@ -242,4 +263,84 @@ enum NotifType {
   NOTE
   DEVOIR
   INFO
+}
+enum PaymentMode {
+  ONCE
+  THREE_TIMES
+  MONTHLY
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  LATE
+}
+
+model Contract {
+  id               Int            @id @default(autoincrement())
+  number           String         @unique
+  studentId        Int
+  student          Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  groupId          Int
+  group            Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  parentName       String?
+  parentEmail      String?
+  parentSignature  String?
+
+  schoolYear       String         @default("2025-2026")
+  courseName       String
+  courseDay        String?
+  courseStartDate  String?
+  nbCours          Int            @default(32)
+  ville  String?  @default("Thionville")
+  totalAmount      Float
+  depositAmount    Float          @default(100)
+  depositPaidAt    DateTime?
+  depositMethod    String?
+  paymentMode      PaymentMode    @default(ONCE)
+
+  status           ContractStatus @default(DRAFT)
+  notes            String?
+  signedAt         DateTime?
+
+  installments     Installment[]
+  emailLogs        EmailLog[]
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model Installment {
+  id          Int               @id @default(autoincrement())
+  contractId  Int
+  contract    Contract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  number      Int
+  amount      Float
+  dueDate     DateTime
+  paidAt      DateTime?
+  paidAmount  Float?
+  method      String?
+  reference   String?
+  status      InstallmentStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+}
+
+model EmailLog {
+  id         Int       @id @default(autoincrement())
+  contractId Int?
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  to         String
+  subject    String
+  type       String
+  sentAt     DateTime  @default(now())
+  success    Boolean   @default(true)
+  error      String?
 }

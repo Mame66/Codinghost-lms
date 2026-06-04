@@ -20,6 +20,7 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/billing', require('./routes/billing'));
 
 app.get('/', (req, res) => {
     res.json({ message: 'CodingHost LMS API ✅' });
