@@ -14,6 +14,13 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/groups', require('./routes/groups'));
 app.use('/api/students', require('./routes/students'));
 app.use('/api/courses', require('./routes/courses'));
+app.use('/api/homeworks', require('./routes/homeworks'));
+app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/payments', require('./routes/payments'));
+app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/stats', require('./routes/stats'));
+app.use('/api/settings', require('./routes/settings'));
+app.use('/api/billing', require('./routes/billing'));
 
 app.get('/', (req, res) => {
     res.json({ message: 'CodingHost LMS API ✅' });

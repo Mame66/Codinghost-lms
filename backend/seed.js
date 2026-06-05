@@ -9,8 +9,8 @@ async function main() {
         const hashedPassword = await bcrypt.hash('admin123', 10);
         await prisma.user.create({
             data: {
-                nom: 'Oukil',
-                prenom: 'Karim',
+                nom: 'Annie',
+                prenom: 'Chaboisseau',
                 email: 'admin@codinghost.dz',
                 login: 'admin',
                 password: hashedPassword,
@@ -84,15 +84,15 @@ async function main() {
         const hashedPass = await bcrypt.hash('teacher123', 10);
         await prisma.user.create({
             data: {
-                nom: 'Hamidi',
-                prenom: 'Sara',
-                email: 'sara@codinghost.dz',
-                login: 'sara.hamidi',
+                nom: 'Mame',
+                prenom: 'Ciss',
+                email: 'mame@codinghost.dz',
+                login: 'Mame.Ciss',
                 password: hashedPass,
                 role: 'TEACHER',
             }
         });
-        console.log('✅ Enseignant créé : sara.hamidi / teacher123');
+        console.log('✅ Enseignant créé : Mame.Ciss / teacher123');
     } catch (err) {
         console.log('⚠️ Enseignant existe déjà');
     }
