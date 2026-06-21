@@ -44,6 +44,7 @@ model Student {
   homeworks   Homework[]
   payments    Payment[]
   contracts  Contract[]
+  lessonProgress  LessonProgress[]
 }
 
 model Course {
@@ -57,6 +58,7 @@ model Course {
   modules      Module[]
   chapters     Chapter[]
   courseGroups CourseGroup[]
+  coverImage  String?
 }
 
 model CourseGroup {
@@ -80,6 +82,14 @@ model Chapter {
   module      Module?     @relation(fields: [moduleId], references: [id], onDelete: SetNull)
 
   tasks    Task[]
+  objectives       String?
+  teacherGuideUrl  String?
+  studentSlidesUrl String?
+  imageUrl         String?
+  challengeContent String?
+  challengeLang    String?  @default("python")
+  lessonProgress   LessonProgress[]
+  quizQuestions    QcmQuestion[]
 }
 model Module {
   id          Int       @id @default(autoincrement())
@@ -228,6 +238,8 @@ model QcmQuestion {
   options  String[]
   correct  Int
   ordre    Int      @default(1)
+  chapterId  Int?
+  chapter    Chapter?  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
 }
 
 model Payment {
@@ -343,4 +355,28 @@ model EmailLog {
   sentAt     DateTime  @default(now())
   success    Boolean   @default(true)
   error      String?
+}
+model LessonProgress {
+  id             Int      @id @default(autoincrement())
+  studentId      Int
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  chapterId      Int
+  chapter        Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  objectivesDone Boolean  @default(false)
+  slidesDone     Boolean  @default(false)
+  imagesDone     Boolean  @default(false)
+  challengeDone  Boolean  @default(false)
+
+  quizSoumis     Boolean  @default(false)
+  quizAnswers    Json?
+  quizScore      Float?
+  quizCorrect    Int?
+  quizTotal      Int?
+
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([studentId, chapterId])
 }
