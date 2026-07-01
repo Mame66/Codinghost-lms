@@ -171,17 +171,69 @@ router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => 
     }
 });
 
-// DELETE supprimer un cours
 router.delete('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const id = parseInt(req.params.id);
     try {
-        await prisma.courseGroup.deleteMany({ where: { courseId: parseInt(req.params.id) } });
-        await prisma.course.delete({ where: { id: parseInt(req.params.id) } });
-        res.json({ message: 'Cours supprimé' });
+        // 1. Supprimer LessonProgress liés aux chapitres du cours
+        await prisma.lessonProgress.deleteMany({
+            where: { chapter: { courseId: id } }
+        });
+
+        // 2. Supprimer LessonProgress liés aux leçons dans les modules
+        await prisma.lessonProgress.deleteMany({
+            where: { chapter: { module: { courseId: id } } }
+        });
+
+        // 3. Supprimer QcmQuestion liés aux chapitres directs
+        await prisma.qcmQuestion.deleteMany({
+            where: { chapter: { courseId: id } }
+        });
+
+        // 4. Supprimer QcmQuestion liés aux leçons dans les modules
+        await prisma.qcmQuestion.deleteMany({
+            where: { chapter: { module: { courseId: id } } }
+        });
+
+        // 5. Supprimer Homework liés aux tâches
+        const tasks = await prisma.task.findMany({
+            where: { chapter: { courseId: id } }
+        });
+        if (tasks.length > 0) {
+            await prisma.homework.deleteMany({
+                where: { taskId: { in: tasks.map(t => t.id) } }
+            });
+        }
+
+        // 6. Supprimer Tasks liés aux chapitres directs
+        await prisma.task.deleteMany({
+            where: { chapter: { courseId: id } }
+        });
+
+        // 7. Supprimer chapitres directs (courseId)
+        await prisma.chapter.deleteMany({ where: { courseId: id } });
+
+        // 8. Supprimer chapitres dans les modules
+        const modules = await prisma.module.findMany({ where: { courseId: id } });
+        for (const mod of modules) {
+            await prisma.chapter.deleteMany({ where: { moduleId: mod.id } });
+        }
+
+        // 9. Supprimer les modules
+        await prisma.module.deleteMany({ where: { courseId: id } });
+
+        // 10. Supprimer CourseGroup
+        await prisma.courseGroup.deleteMany({ where: { courseId: id } });
+
+        // 11. Supprimer le cours
+        await prisma.course.delete({ where: { id } });
+
+        res.json({ message: 'Cours supprimé avec succès' });
     } catch (err) {
         console.error('DELETE /courses/:id error:', err.message);
-        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+        res.status(500).json({ message: 'Erreur suppression', error: err.message });
     }
 });
+
 
 // ─────────────────────────────────────────────
 // MODULES
