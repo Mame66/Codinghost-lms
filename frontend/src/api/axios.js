@@ -1,7 +1,10 @@
 import axios from 'axios';
 
+// Create React App utilise process.env au lieu de import.meta.env
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
 const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: API_URL,
 });
 
 // Ajouter le token JWT automatiquement

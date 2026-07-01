@@ -1,575 +1,788 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
 
+// ── Icônes ─────────────────────────────────────────────────
+const Ic = ({ name, size = 16, color = 'currentColor' }) => {
+    const a = { width:size, height:size, viewBox:'0 0 24 24', fill:'none', stroke:color, strokeWidth:'1.8', strokeLinecap:'round', strokeLinejoin:'round' };
+    const icons = {
+        plus:    <svg {...a}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+        edit:    <svg {...a}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+        trash:   <svg {...a}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>,
+        book:    <svg {...a}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+        layers:  <svg {...a}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>,
+        file:    <svg {...a}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+        target:  <svg {...a}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+        slide:   <svg {...a}><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>,
+        image:   <svg {...a}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
+        qcm:     <svg {...a}><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>,
+        code:    <svg {...a}><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>,
+        teacher: <svg {...a}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M16 11h6M19 8v6"/></svg>,
+        save:    <svg {...a}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
+        link:    <svg {...a}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+        back:    <svg {...a}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,
+        check:   <svg {...a} strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,
+        group:   <svg {...a}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+    };
+    return icons[name] ? <span style={{ display:'inline-flex', alignItems:'center', flexShrink:0 }}>{icons[name]}</span> : null;
+};
+
+// ── Toast ──────────────────────────────────────────────────
+const Toast = ({ msg, type }) => (
+    <div style={{ position:'fixed', top:'70px', right:'20px', zIndex:999, padding:'12px 20px', borderRadius:'10px', background:type==='error'?'#FEF2F2':'#ECFDF5', border:`1px solid ${type==='error'?'#FECACA':'#A7F3D0'}`, color:type==='error'?'#DC2626':'#059669', fontWeight:'700', fontSize:'13px', boxShadow:'0 4px 20px rgba(0,0,0,0.12)', display:'flex', alignItems:'center', gap:'8px' }}>
+        {type==='error'?'❌':'✅'} {msg}
+    </div>
+);
+
+// ── Helpers ────────────────────────────────────────────────
+const Inp = (props) => <input {...props} style={{ padding:'9px 12px', border:'1.5px solid #E5E7EB', borderRadius:'8px', fontSize:'13px', color:'#111827', outline:'none', background:'#fff', fontFamily:'inherit', width:'100%', boxSizing:'border-box', ...props.style }}/>;
+const Txt = (props) => <textarea {...props} style={{ padding:'9px 12px', border:'1.5px solid #E5E7EB', borderRadius:'8px', fontSize:'13px', color:'#111827', outline:'none', background:'#fff', fontFamily:'inherit', resize:'vertical', minHeight:'80px', width:'100%', boxSizing:'border-box', ...props.style }}/>;
+
+// Éléments badge pour une leçon
+const ELEMENTS = [
+    { key:'objectives',    label:'Objectifs',  icon:'target',  color:'#8B5CF6', bg:'#EDE9FE' },
+    { key:'teacherGuide',  label:'Guide Prof', icon:'teacher', color:'#0284C7', bg:'#E0F2FE' },
+    { key:'studentSlides', label:'Slides',     icon:'slide',   color:'#5B2EE8', bg:'#EDE8FF' },
+    { key:'image',         label:'Image',      icon:'image',   color:'#059669', bg:'#ECFDF5' },
+    { key:'quiz',          label:'Quiz',       icon:'qcm',     color:'#D97706', bg:'#FFFBEB' },
+    { key:'challenge',     label:'Challenge',  icon:'code',    color:'#DC2626', bg:'#FEF2F2' },
+];
+
+const hasElement = (lesson, key) => {
+    if (key === 'objectives')    return !!lesson.objectives;
+    if (key === 'teacherGuide')  return !!lesson.teacherGuideUrl;
+    if (key === 'studentSlides') return !!lesson.studentSlidesUrl;
+    if (key === 'image')         return !!lesson.imageUrl;
+    if (key === 'challenge')     return !!lesson.challengeContent;
+    if (key === 'quiz')          return (lesson.quizQuestions||[]).length > 0;
+    return false;
+};
+
+// GroupSelector — hors composant pour éviter bug curseur
+const GroupSelector = ({ selectedIds, onChange, groups }) => (
+    <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'180px', overflowY:'auto', border:'1.5px solid #E5E7EB', borderRadius:'8px', padding:'8px', background:'#F9FAFB' }}>
+        {groups.length === 0 && <div style={{ color:'#9CA3AF', fontSize:'13px', padding:'8px' }}>Aucun groupe disponible</div>}
+        {groups.map(g => (
+            <div key={g.id}
+                 style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', borderRadius:'8px', cursor:'pointer', border: selectedIds.includes(g.id)?'1.5px solid #5B2EE8':'1.5px solid transparent', background: selectedIds.includes(g.id)?'#F5F2FF':'#fff', transition:'all 0.1s' }}
+                 onClick={() => {
+                     const ids = selectedIds.includes(g.id)
+                         ? selectedIds.filter(id => id !== g.id)
+                         : [...selectedIds, g.id];
+                     onChange(ids);
+                 }}>
+                <div style={{ width:'18px', height:'18px', borderRadius:'4px', border:`2px solid ${selectedIds.includes(g.id)?'#5B2EE8':'#D1D5DB'}`, background:selectedIds.includes(g.id)?'#5B2EE8':'#fff', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    {selectedIds.includes(g.id) && <Ic name="check" size={11} color="#fff"/>}
+                </div>
+                <span style={{ fontSize:'13px', fontWeight:'600', color:'#1A1040' }}>{g.titre}</span>
+                {g.ville && <span style={{ fontSize:'11px', color: g.ville==='Metz'?'#1D4ED8':'#166534', background: g.ville==='Metz'?'#EFF6FF':'#F0FDF4', padding:'1px 6px', borderRadius:'4px', fontWeight:'700', marginLeft:'auto' }}>{g.ville}</span>}
+            </div>
+        ))}
+    </div>
+);
+
+// ════════════════════════════════════════════════════════════
+// COMPOSANT PRINCIPAL
+// ════════════════════════════════════════════════════════════
 export default function MyCourses() {
     const { user } = useAuth();
-    const isAdmin = user?.role === 'ADMIN';
+    const isAdmin  = user?.role === 'ADMIN';
 
-    const [courses, setCourses]               = useState([]);
-    const [groups, setGroups]                 = useState([]);
-    const [loading, setLoading]               = useState(true);
-    const [view, setView]                     = useState('list');
-    const [selectedCourse, setSelectedCourse] = useState(null);
-    const [selectedChapter, setSelectedChapter] = useState(null);
+    const [courses, setCourses]   = useState([]);
+    const [groups,  setGroups]    = useState([]);
+    const [loading, setLoading]   = useState(true);
+    const [saving,  setSaving]    = useState(false);
+    const [toast,   setToast]     = useState(null);
 
-    const [showAddCourse, setShowAddCourse]   = useState(false);
-    const [showEditCourse, setShowEditCourse] = useState(false);
-    const [showAddChapter, setShowAddChapter] = useState(false);
-    const [showAddTask, setShowAddTask]       = useState(false);
-    const [showQcmEditor, setShowQcmEditor]   = useState(false);
-    const [editingTask, setEditingTask]       = useState(null);
+    // Navigation
+    const [view,      setView]      = useState('courses');
+    const [selCourse, setSelCourse] = useState(null);
+    const [selModule, setSelModule] = useState(null);
+    const [selLesson, setSelLesson] = useState(null);
 
-    const [courseForm, setCourseForm] = useState({ titre: '', description: '', niveau: 'Débutant', groupIds: [] });
-    const [chapterForm, setChapterForm] = useState({ titre: '' });
-    const [taskForm, setTaskForm] = useState({
-        titre: '', type: 'SLIDE', contenuUrl: '', description: '',
-        scriptContent: '', scriptLanguage: 'python'
+    // Modals
+    const [showCourseModal, setShowCourseModal] = useState(false);
+    const [showModuleModal, setShowModuleModal] = useState(false);
+    const [showLessonModal, setShowLessonModal] = useState(false);
+    const [showQuizModal,   setShowQuizModal]   = useState(false);
+    const [editingCourse,   setEditingCourse]   = useState(null);
+    const [editingModule,   setEditingModule]   = useState(null);
+    const [editingQuestion, setEditingQuestion] = useState(null);
+
+    // Forms
+    const emptyCourse = { titre:'', description:'', niveau:'', coverImage:'', groupIds:[] };
+    const [courseForm, setCourseForm] = useState(emptyCourse);
+    const [moduleForm, setModuleForm] = useState({ titre:'', description:'' });
+    const [lessonForm, setLessonForm] = useState({
+        titre:'', objectives:'', teacherGuideUrl:'', studentSlidesUrl:'',
+        imageUrl:'', challengeContent:'', challengeLang:'python',
     });
-    const [questions, setQuestions] = useState([{ question: '', options: ['', '', '', ''], correct: 0 }]);
+    const [quizForm, setQuizForm] = useState({ question:'', options:['','','',''], correct:0 });
 
-    // Drag refs
-    const dragItem    = useRef(null);
-    const dragOver    = useRef(null);
-    const taskDragItem = useRef(null);
-    const taskDragOver = useRef(null);
+    useEffect(() => { fetchAll(); }, []);
 
-    useEffect(() => { fetchCourses(); fetchGroups(); }, []);
+    const showToast = (msg, type='success') => {
+        setToast({msg, type});
+        setTimeout(() => setToast(null), 3000);
+    };
 
-    const fetchCourses = async () => {
-        try { const res = await api.get('/courses'); setCourses(res.data); }
-        catch (err) { console.error(err); }
+    const fetchAll = async () => {
+        setLoading(true);
+        try {
+            const [cRes, gRes] = await Promise.all([
+                api.get('/courses'),
+                api.get('/groups'),
+            ]);
+            setCourses(cRes.data);
+            setGroups(gRes.data);
+        } catch (err) { console.error(err); }
         setLoading(false);
     };
-    const fetchGroups = async () => {
-        try { const res = await api.get('/groups'); setGroups(res.data); }
-        catch (err) { console.error(err); }
-    };
-    const refreshCourse = async (id) => {
-        const res = await api.get(`/courses/${id}`);
-        setSelectedCourse(res.data);
-        fetchCourses();
+
+    // ── Fetch modules / leçons ────────────────────────────
+    const fetchModules = async (courseId) => {
+        try { const r = await api.get(`/lessons/courses/${courseId}/modules`); return r.data; }
+        catch { return []; }
     };
 
-    // ── COURS ───────────────────────────────────
-    const createCourse = async () => {
-        if (!courseForm.titre) return alert('Titre obligatoire');
-        try {
-            await api.post('/courses', courseForm);
-            setShowAddCourse(false);
-            setCourseForm({ titre: '', description: '', niveau: 'Débutant', groupIds: [] });
-            fetchCourses();
-        } catch (err) { alert('Erreur création'); }
+    const fetchLessons = async (moduleId) => {
+        try { const r = await api.get(`/lessons/modules/${moduleId}/lessons`); return r.data; }
+        catch { return []; }
     };
-    const editCourse = async () => {
-        if (!courseForm.titre) return alert('Titre obligatoire');
-        try {
-            await api.put(`/courses/${selectedCourse.id}`, courseForm);
-            setShowEditCourse(false);
-            refreshCourse(selectedCourse.id);
-        } catch (err) { alert(err.response?.data?.message || 'Erreur'); }
+
+    const refreshCourse = async () => {
+        if (!selCourse) return;
+        const modules = await fetchModules(selCourse.id);
+        setSelCourse(prev => ({...prev, modules}));
+        if (selModule) {
+            const updated = modules.find(m => m.id === selModule.id);
+            if (updated) setSelModule(updated);
+        }
     };
+
+    // ── Ouvrir cours / module / leçon ─────────────────────
+    const openCourse = async (course) => {
+        setLoading(true);
+        const modules = await fetchModules(course.id);
+        setSelCourse({...course, modules});
+        setSelModule(null); setSelLesson(null);
+        setView('modules');
+        setLoading(false);
+    };
+
+    const openModule = async (mod) => {
+        setLoading(true);
+        const lessons = await fetchLessons(mod.id);
+        setSelModule({...mod, chapters:lessons});
+        setSelLesson(null);
+        setView('lessons');
+        setLoading(false);
+    };
+
+    const openLesson = async (lesson) => {
+        try {
+            const r = await api.get(`/lessons/lessons/${lesson.id}`);
+            setSelLesson(r.data);
+            setLessonForm({
+                titre:            r.data.titre            || '',
+                objectives:       r.data.objectives       || '',
+                teacherGuideUrl:  r.data.teacherGuideUrl  || '',
+                studentSlidesUrl: r.data.studentSlidesUrl || '',
+                imageUrl:         r.data.imageUrl         || '',
+                challengeContent: r.data.challengeContent || '',
+                challengeLang:    r.data.challengeLang    || 'python',
+            });
+            setView('lesson-edit');
+        } catch { showToast('Erreur chargement leçon','error'); }
+    };
+
+    // ════════════════════════════════════════════════════════
+    // CRUD COURS
+    // ════════════════════════════════════════════════════════
+    const saveCourse = async () => {
+        if (!courseForm.titre) return alert('Titre obligatoire');
+        setSaving(true);
+        try {
+            if (editingCourse) {
+                await api.put(`/courses/${editingCourse.id}`, courseForm);
+                showToast('Cours modifié !');
+            } else {
+                await api.post('/courses', courseForm);
+                showToast('Cours créé !');
+            }
+            setShowCourseModal(false);
+            setEditingCourse(null);
+            setCourseForm(emptyCourse);
+            fetchAll();
+        } catch { showToast('Erreur','error'); }
+        setSaving(false);
+    };
+
     const deleteCourse = async (id) => {
         if (!window.confirm('Supprimer ce cours ?')) return;
-        try {
-            await api.delete(`/courses/${id}`);
-            setCourses(courses.filter(c => c.id !== id));
-            if (selectedCourse?.id === id) { setView('list'); setSelectedCourse(null); }
-        } catch (err) { alert('Erreur'); }
-    };
-    const toggleAdminLock = async (course) => {
-        try {
-            await api.put(`/courses/${course.id}`, { lockedByAdmin: !course.lockedByAdmin });
-            fetchCourses();
-            if (selectedCourse?.id === course.id) refreshCourse(course.id);
-        } catch (err) { alert('Erreur'); }
+        try { await api.delete(`/courses/${id}`); fetchAll(); showToast('Cours supprimé'); }
+        catch { showToast('Erreur suppression','error'); }
     };
 
-    // ── CHAPITRES ────────────────────────────────
-    const createChapter = async () => {
-        if (!chapterForm.titre) return alert('Titre obligatoire');
+    // ════════════════════════════════════════════════════════
+    // CRUD MODULES
+    // ════════════════════════════════════════════════════════
+    const saveModule = async () => {
+        if (!moduleForm.titre) return alert('Titre obligatoire');
+        setSaving(true);
         try {
-            await api.post(`/courses/${selectedCourse.id}/chapters`, { titre: chapterForm.titre });
-            setShowAddChapter(false);
-            setChapterForm({ titre: '' });
-            refreshCourse(selectedCourse.id);
-        } catch (err) { alert('Erreur'); }
-    };
-    const toggleChapter = async (id) => {
-        try { await api.put(`/courses/chapters/${id}/toggle`); refreshCourse(selectedCourse.id); }
-        catch (err) { alert(err.response?.data?.message || 'Erreur'); }
-    };
-    const deleteChapter = async (id) => {
-        if (!window.confirm('Supprimer ce chapitre et ses tâches ?')) return;
-        try { await api.delete(`/courses/chapters/${id}`); refreshCourse(selectedCourse.id); }
-        catch (err) { alert('Erreur'); }
-    };
-
-    // ── DRAG & DROP CHAPITRES ────────────────────
-    const handleChapterDragStart = (e, index) => { dragItem.current = index; };
-    const handleChapterDragEnter = (e, index) => { dragOver.current = index; };
-    const handleChapterDragEnd   = async () => {
-        if (dragItem.current === null || dragOver.current === null || dragItem.current === dragOver.current) {
-            dragItem.current = null; dragOver.current = null; return;
-        }
-        const chapters = [...(selectedCourse?.chapters || [])].sort((a, b) => a.ordre - b.ordre);
-        const dragged = chapters[dragItem.current];
-        chapters.splice(dragItem.current, 1);
-        chapters.splice(dragOver.current, 0, dragged);
-        dragItem.current = null; dragOver.current = null;
-        // ✅ FIX: envoyer orderedIds (tableau d'IDs)
-        const orderedIds = chapters.map(c => c.id);
-        try { await api.put(`/courses/${selectedCourse.id}/chapters/reorder`, { orderedIds }); refreshCourse(selectedCourse.id); }
-        catch (err) { alert('Erreur réorganisation'); }
-    };
-
-    // ── DRAG & DROP TÂCHES ───────────────────────
-    const handleTaskDragStart = (e, index) => { taskDragItem.current = index; };
-    const handleTaskDragEnter = (e, index) => { taskDragOver.current = index; };
-    const handleTaskDragEnd   = async (chap) => {
-        if (taskDragItem.current === null || taskDragOver.current === null || taskDragItem.current === taskDragOver.current) {
-            taskDragItem.current = null; taskDragOver.current = null; return;
-        }
-        const tasks = [...(chap.tasks || [])].sort((a, b) => a.ordre - b.ordre);
-        const dragged = tasks[taskDragItem.current];
-        tasks.splice(taskDragItem.current, 1);
-        tasks.splice(taskDragOver.current, 0, dragged);
-        taskDragItem.current = null; taskDragOver.current = null;
-        // ✅ FIX: envoyer orderedIds (tableau d'IDs)
-        const orderedIds = tasks.map(t => t.id);
-        try { await api.put(`/courses/chapters/${chap.id}/tasks/reorder`, { orderedIds }); refreshCourse(selectedCourse.id); }
-        catch (err) { alert('Erreur réorganisation tâches'); }
-    };
-
-    // ── TÂCHES ───────────────────────────────────
-    const createTask = async () => {
-        if (!taskForm.titre) return alert('Titre obligatoire');
-        try {
-            const payload = {
-                titre:       taskForm.titre,
-                type:        taskForm.type,
-                contenuUrl:  taskForm.contenuUrl  || null,
-                description: taskForm.description || null,
-            };
-            // Champs script
-            if (taskForm.type === 'SCRIPT') {
-                payload.scriptContent  = taskForm.scriptContent  || null;
-                payload.scriptLanguage = taskForm.scriptLanguage || 'python';
-            }
-            const res = await api.post(`/courses/chapters/${selectedChapter.id}/tasks`, payload);
-            if (taskForm.type === 'QCM') {
-                setEditingTask(res.data);
-                setShowAddTask(false);
-                setQuestions([{ question: '', options: ['', '', '', ''], correct: 0 }]);
-                setShowQcmEditor(true);
+            if (editingModule) {
+                await api.put(`/lessons/modules/${editingModule.id}`, moduleForm);
+                showToast('Module modifié !');
             } else {
-                setShowAddTask(false);
-                setTaskForm({ titre: '', type: 'SLIDE', contenuUrl: '', description: '', scriptContent: '', scriptLanguage: 'python' });
-                refreshCourse(selectedCourse.id);
+                await api.post(`/lessons/courses/${selCourse.id}/modules`, moduleForm);
+                showToast('Module créé !');
             }
-        } catch (err) { alert(err.response?.data?.message || 'Erreur création tâche'); }
+            setShowModuleModal(false);
+            setEditingModule(null);
+            setModuleForm({ titre:'', description:'' });
+            await refreshCourse();
+        } catch { showToast('Erreur','error'); }
+        setSaving(false);
     };
 
-    const saveQcm = async () => {
-        const valid = questions.every(q => q.question && q.options.every(o => o));
-        if (!valid) return alert('Remplissez toutes les questions et options');
+    const deleteModule = async (id) => {
+        if (!window.confirm('Supprimer ce module et toutes ses leçons ?')) return;
         try {
-            await api.post(`/courses/tasks/${editingTask.id}/questions`, { questions });
-            setShowQcmEditor(false);
-            setEditingTask(null);
-            setTaskForm({ titre: '', type: 'SLIDE', contenuUrl: '', description: '', scriptContent: '', scriptLanguage: 'python' });
-            refreshCourse(selectedCourse.id);
-        } catch (err) { alert('Erreur QCM'); }
+            await api.delete(`/lessons/modules/${id}`);
+            await refreshCourse();
+            if (selModule?.id === id) { setSelModule(null); setView('modules'); }
+            showToast('Module supprimé');
+        } catch { showToast('Erreur','error'); }
     };
 
-    const toggleTask = async (id) => {
-        try { await api.put(`/courses/tasks/${id}/toggle`); refreshCourse(selectedCourse.id); }
-        catch (err) { alert(err.response?.data?.message || 'Erreur'); }
+    // ════════════════════════════════════════════════════════
+    // CRUD LEÇONS
+    // ════════════════════════════════════════════════════════
+    const saveLesson = async () => {
+        if (!lessonForm.titre) return alert('Titre obligatoire');
+        setSaving(true);
+        try {
+            if (selLesson && view === 'lesson-edit') {
+                await api.put(`/lessons/lessons/${selLesson.id}`, lessonForm);
+                const r = await api.get(`/lessons/lessons/${selLesson.id}`);
+                setSelLesson(r.data);
+                showToast('Leçon sauvegardée !');
+            } else {
+                await api.post(`/lessons/modules/${selModule.id}/lessons`, {
+                    ...lessonForm, courseId: selCourse.id,
+                });
+                showToast('Leçon créée !');
+                setShowLessonModal(false);
+                setLessonForm({ titre:'', objectives:'', teacherGuideUrl:'', studentSlidesUrl:'', imageUrl:'', challengeContent:'', challengeLang:'python' });
+            }
+            if (selModule) await openModule(selModule);
+        } catch { showToast('Erreur','error'); }
+        setSaving(false);
     };
-    const deleteTask = async (id) => {
-        if (!window.confirm('Supprimer cette tâche ?')) return;
-        try { await api.delete(`/courses/tasks/${id}`); refreshCourse(selectedCourse.id); }
-        catch (err) { alert('Erreur'); }
+
+    const deleteLesson = async (id) => {
+        if (!window.confirm('Supprimer cette leçon ?')) return;
+        try {
+            await api.delete(`/lessons/lessons/${id}`);
+            if (selModule) await openModule(selModule);
+            if (selLesson?.id === id) { setSelLesson(null); setView('lessons'); }
+            showToast('Leçon supprimée');
+        } catch { showToast('Erreur','error'); }
     };
 
-    // QCM helpers
-    const addQuestion    = () => setQuestions([...questions, { question: '', options: ['', '', '', ''], correct: 0 }]);
-    const removeQuestion = (i) => setQuestions(questions.filter((_, idx) => idx !== i));
-    const updateQuestion = (i, field, val) => { const q = [...questions]; q[i] = { ...q[i], [field]: val }; setQuestions(q); };
-    const updateOption   = (qi, oi, val) => { const q = [...questions]; q[qi].options[oi] = val; setQuestions(q); };
-    const canModify      = (course) => isAdmin || course?.createdBy === user?.id;
-
-    const typeConfig = {
-        SLIDE:  { emoji: '📊', label: 'Slide',  desc: 'Présentation',           color: '#5B2EE8', bg: '#EDE8FF' },
-        QCM:    { emoji: '✅', label: 'QCM',    desc: 'Questions choix multiples', color: '#059669', bg: '#ECFDF5' },
-        DEVOIR: { emoji: '📁', label: 'Devoir', desc: 'Rendu fichier/texte',     color: '#DC2626', bg: '#FEF2F2' },
-        SCRIPT: { emoji: '💻', label: 'Script', desc: 'Code Python/JS/HTML',     color: '#0284C7', bg: '#E0F2FE' },
+    // ════════════════════════════════════════════════════════
+    // CRUD QUIZ
+    // ════════════════════════════════════════════════════════
+    const saveQuestion = async () => {
+        if (!quizForm.question || quizForm.options.some(o => !o)) return alert('Remplissez tous les champs');
+        setSaving(true);
+        try {
+            if (editingQuestion) {
+                await api.put(`/lessons/quiz/${editingQuestion.id}`, quizForm);
+                showToast('Question modifiée !');
+            } else {
+                await api.post(`/lessons/lessons/${selLesson.id}/quiz`, quizForm);
+                showToast('Question ajoutée !');
+            }
+            setShowQuizModal(false);
+            setEditingQuestion(null);
+            setQuizForm({ question:'', options:['','','',''], correct:0 });
+            const r = await api.get(`/lessons/lessons/${selLesson.id}`);
+            setSelLesson(r.data);
+        } catch { showToast('Erreur','error'); }
+        setSaving(false);
     };
 
-    const LANGUAGES = ['python', 'javascript', 'html', 'css', 'scratch'];
+    const deleteQuestion = async (id) => {
+        if (!window.confirm('Supprimer cette question ?')) return;
+        try {
+            await api.delete(`/lessons/quiz/${id}`);
+            const r = await api.get(`/lessons/lessons/${selLesson.id}`);
+            setSelLesson(r.data);
+            showToast('Question supprimée');
+        } catch { showToast('Erreur','error'); }
+    };
 
-    // GroupSelector — OUTSIDE render pour éviter le bug curseur
-    const GroupSelector = ({ selectedIds, onChange }) => (
-        <div style={gs.wrap}>
-            {groups.map(g => (
-                <div key={g.id} style={{ ...gs.item, border: selectedIds.includes(g.id) ? '2px solid #5B2EE8' : '2px solid #E5E0F5', background: selectedIds.includes(g.id) ? '#F5F2FF' : '#fff' }}
-                     onClick={() => {
-                         const ids = selectedIds.includes(g.id) ? selectedIds.filter(id => id !== g.id) : [...selectedIds, g.id];
-                         onChange(ids);
-                     }}>
-                    <span style={{ fontSize: '14px' }}>{selectedIds.includes(g.id) ? '✅' : '○'}</span>
-                    <span style={gs.name}>{g.titre}</span>
-                </div>
-            ))}
-        </div>
-    );
-
-    // ── VUE LISTE ────────────────────────────────
-    if (view === 'list') return (
-        <div>
-            <div style={s.ph}>
-                <h1 style={s.h1}>{isAdmin ? 'Tous les cours' : 'Mes Cours'}</h1>
-                <button style={s.btnP} onClick={() => setShowAddCourse(true)}>+ Nouveau cours</button>
-            </div>
-
-            {loading ? <div style={s.empty}>Chargement...</div>
-                : courses.length === 0 ? (
-                    <div style={s.emptyBox}>
-                        <div style={{ fontSize: '48px', marginBottom: '12px' }}>📚</div>
-                        <div style={s.emptyTitle}>Aucun cours</div>
-                        <button style={{ ...s.btnP, marginTop: '16px' }} onClick={() => setShowAddCourse(true)}>+ Créer un cours</button>
-                    </div>
-                ) : (
-                    <div style={s.grid}>
-                        {courses.map(course => (
-                            <div key={course.id} style={{ ...s.card, border: course.lockedByAdmin ? '1px solid #FECACA' : '1px solid #E5E0F5' }}>
-                                <div style={s.cardTop}>
-                                    <div style={s.cardIcon}>📚</div>
-                                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                                        {isAdmin && (
-                                            <button style={{ ...s.btnSmE, background: course.lockedByAdmin ? '#FEF2F2' : '#ECFDF5', color: course.lockedByAdmin ? '#DC2626' : '#059669' }}
-                                                    onClick={() => toggleAdminLock(course)}>
-                                                {course.lockedByAdmin ? '🔒 Admin' : '🔓 Libre'}
-                                            </button>
-                                        )}
-                                        {canModify(course) && (
-                                            <>
-                                                <button style={s.btnSmE} onClick={() => {
-                                                    setSelectedCourse(course);
-                                                    setCourseForm({ titre: course.titre, description: course.description || '', niveau: course.niveau || 'Débutant', groupIds: course.courseGroups?.map(cg => cg.groupId) || [] });
-                                                    setShowEditCourse(true);
-                                                }}>✏️</button>
-                                                <button style={s.btnSmD} onClick={() => deleteCourse(course.id)}>🗑️</button>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                                {course.lockedByAdmin && !isAdmin && <div style={s.adminLockBadge}>🔒 Verrouillé par l'admin</div>}
-                                <div style={s.cardTitle}>{course.titre}</div>
-                                <div style={s.cardDesc}>{course.description || 'Aucune description'}</div>
-                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                                    {course.courseGroups?.map(cg => (
-                                        <span key={cg.id} style={s.groupTag}>🏫 {cg.group?.titre}</span>
-                                    ))}
-                                    {(!course.courseGroups || course.courseGroups.length === 0) && <span style={s.noGroup}>Aucun groupe</span>}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', color: '#6B7280', fontWeight: '600' }}>
-                    {course.chapters?.length || 0} chapitre(s)
-                  </span>
-                                    <button style={s.cardBtn} onClick={() => { setSelectedCourse(course); setView('detail'); }}>
-                                        Gérer →
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-            {/* Modal Add Course */}
-            {showAddCourse && (
-                <div style={s.modalBg} onClick={() => setShowAddCourse(false)}>
-                    <div style={s.modal} onClick={e => e.stopPropagation()}>
-                        <h2 style={s.modalTitle}>➕ Nouveau cours</h2>
-                        <div style={s.fg}><label style={s.fl}>Titre *</label>
-                            <input style={s.fi} placeholder="ex: Python Débutant" value={courseForm.titre} onChange={e => setCourseForm({ ...courseForm, titre: e.target.value })} /></div>
-                        <div style={s.fg}><label style={s.fl}>Description</label>
-                            <textarea style={{ ...s.fi, minHeight: '70px', resize: 'vertical' }} value={courseForm.description} onChange={e => setCourseForm({ ...courseForm, description: e.target.value })} /></div>
-                        <div style={s.fg}><label style={s.fl}>Niveau</label>
-                            <select style={s.fi} value={courseForm.niveau} onChange={e => setCourseForm({ ...courseForm, niveau: e.target.value })}>
-                                <option>Débutant</option><option>Intermédiaire</option><option>Avancé</option>
-                            </select></div>
-                        <div style={s.fg}>
-                            <label style={s.fl}>Groupes assignés</label>
-                            <GroupSelector selectedIds={courseForm.groupIds} onChange={ids => setCourseForm({ ...courseForm, groupIds: ids })} />
-                        </div>
-                        <div style={s.modalFoot}>
-                            <button style={s.btnO} onClick={() => setShowAddCourse(false)}>Annuler</button>
-                            <button style={s.btnP} onClick={createCourse}>Créer</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal Edit Course */}
-            {showEditCourse && (
-                <div style={s.modalBg} onClick={() => setShowEditCourse(false)}>
-                    <div style={s.modal} onClick={e => e.stopPropagation()}>
-                        <h2 style={s.modalTitle}>✏️ Modifier le cours</h2>
-                        <div style={s.fg}><label style={s.fl}>Titre *</label>
-                            <input style={s.fi} value={courseForm.titre} onChange={e => setCourseForm({ ...courseForm, titre: e.target.value })} /></div>
-                        <div style={s.fg}><label style={s.fl}>Description</label>
-                            <textarea style={{ ...s.fi, minHeight: '70px', resize: 'vertical' }} value={courseForm.description} onChange={e => setCourseForm({ ...courseForm, description: e.target.value })} /></div>
-                        <div style={s.fg}><label style={s.fl}>Niveau</label>
-                            <select style={s.fi} value={courseForm.niveau} onChange={e => setCourseForm({ ...courseForm, niveau: e.target.value })}>
-                                <option>Débutant</option><option>Intermédiaire</option><option>Avancé</option>
-                            </select></div>
-                        <div style={s.fg}>
-                            <label style={s.fl}>Groupes assignés</label>
-                            <GroupSelector selectedIds={courseForm.groupIds} onChange={ids => setCourseForm({ ...courseForm, groupIds: ids })} />
-                        </div>
-                        <div style={s.modalFoot}>
-                            <button style={s.btnO} onClick={() => setShowEditCourse(false)}>Annuler</button>
-                            <button style={s.btnP} onClick={editCourse}>💾 Sauvegarder</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-
-    // ── VUE DÉTAIL ───────────────────────────────
-    const sortedChapters = [...(selectedCourse?.chapters || [])].sort((a, b) => a.ordre - b.ordre);
+    // ════════════════════════════════════════════════════════
+    // RENDER
+    // ════════════════════════════════════════════════════════
+    const GRADIENTS = [
+        ['#5B2EE8','#8B5CF6'], ['#0284C7','#38BDF8'], ['#059669','#34D399'],
+        ['#DC2626','#F87171'], ['#D97706','#FCD34D'], ['#7C3AED','#A78BFA'],
+    ];
 
     return (
-        <div>
-            <div style={s.ph}>
-                <button style={s.btnO} onClick={() => { setView('list'); setSelectedCourse(null); }}>← Cours</button>
-                <div style={{ flex: 1 }}>
-                    <h1 style={s.h1}>{selectedCourse?.titre}</h1>
-                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
-                        {selectedCourse?.courseGroups?.map(cg => (
-                            <span key={cg.id} style={s.groupTag}>🏫 {cg.group?.titre}</span>
-                        ))}
-                    </div>
-                </div>
-                {canModify(selectedCourse) && !selectedCourse?.lockedByAdmin && (
-                    <button style={s.btnP} onClick={() => setShowAddChapter(true)}>+ Chapitre</button>
-                )}
-            </div>
+        <div style={{ position:'relative' }}>
+            {toast && <Toast {...toast}/>}
 
-            {/* Bandeau verrouillé admin */}
-            {selectedCourse?.lockedByAdmin && !isAdmin && (
-                <div style={s.lockedBanner}>
-                    🔒 Ce cours est verrouillé par l'administrateur — vous ne pouvez pas le modifier
+            {/* ════ VUE COURS ════ */}
+            {view === 'courses' && (
+                <div>
+                    <div style={s.ph}>
+                        <h1 style={s.h1}>📚 {isAdmin ? 'Tous les cours' : 'Mes Cours'}</h1>
+                        <button style={s.btnPri} onClick={() => { setCourseForm(emptyCourse); setEditingCourse(null); setShowCourseModal(true); }}>
+                            <Ic name="plus" size={13} color="#fff"/> Nouveau cours
+                        </button>
+                    </div>
+
+                    {loading ? <div style={s.empty}>Chargement...</div>
+                        : courses.length === 0 ? (
+                            <div style={s.emptyState}>
+                                <div style={s.emptyIco}><Ic name="book" size={36} color="#9CA3AF"/></div>
+                                <div style={s.emptyTitle}>Aucun cours</div>
+                                <div style={{ fontSize:'13px', color:'#9CA3AF' }}>Créez votre premier cours</div>
+                            </div>
+                        ) : (
+                            <div style={s.courseGrid}>
+                                {courses.map((c, idx) => {
+                                    const [c1, c2] = GRADIENTS[idx % GRADIENTS.length];
+                                    const assignedGroups = c.courseGroups || [];
+                                    return (
+                                        <div key={c.id} style={s.courseCard}>
+                                            {/* ── Bannière avec image de couverture ── */}
+                                            <div style={{
+                                                height:'130px',
+                                                background: `linear-gradient(135deg,${c1},${c2})`,
+                                                position:'relative',
+                                                display:'flex', alignItems:'center', justifyContent:'center',
+                                                overflow:'hidden',
+                                            }}>
+                                                {/* ✅ Image via balise img (fonctionne avec base64 ET https) */}
+                                                {c.coverImage && (
+                                                    <img
+                                                        src={c.coverImage}
+                                                        alt=""
+                                                        style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover' }}
+                                                        onError={e => e.target.style.display='none'}
+                                                    />
+                                                )}
+                                                {c.coverImage && <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.25)' }}/>}
+
+                                                {/* Titre sur la bannière */}
+                                                <div style={{ position:'relative', zIndex:1, textAlign:'center', padding:'0 12px' }}>
+                                                    <div style={{ fontFamily:'sans-serif', fontSize:'17px', fontWeight:'900', color:'#fff', lineHeight:1.3, textShadow:'0 1px 4px rgba(0,0,0,0.3)' }}>{c.titre}</div>
+                                                    {c.niveau && <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.85)', marginTop:'3px', fontWeight:'600' }}>{c.niveau}</div>}
+                                                </div>
+
+                                                {/* Boutons edit/delete */}
+                                                <div style={{ position:'absolute', top:'8px', right:'8px', display:'flex', gap:'4px', zIndex:2 }}>
+                                                    <button style={s.iconBtn} onClick={() => {
+                                                        setCourseForm({ titre:c.titre, description:c.description||'', niveau:c.niveau||'', coverImage:c.coverImage||'', groupIds:c.courseGroups?.map(cg=>cg.groupId)||[] });
+                                                        setEditingCourse(c);
+                                                        setShowCourseModal(true);
+                                                    }}><Ic name="edit" size={13} color="#fff"/></button>
+                                                    <button style={{ ...s.iconBtn, background:'rgba(220,38,38,0.7)' }} onClick={() => deleteCourse(c.id)}>
+                                                        <Ic name="trash" size={13} color="#fff"/>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* ── Corps ── */}
+                                            <div style={{ padding:'14px 16px' }}>
+                                                {c.description && <div style={{ fontSize:'12px', color:'#6B7280', lineHeight:1.5, marginBottom:'10px' }}>{c.description}</div>}
+
+                                                {/* Groupes assignés */}
+                                                <div style={{ display:'flex', gap:'4px', flexWrap:'wrap', marginBottom:'10px' }}>
+                                                    {assignedGroups.length === 0
+                                                        ? <span style={{ fontSize:'11px', color:'#9CA3AF', fontStyle:'italic' }}>Aucun groupe assigné</span>
+                                                        : assignedGroups.map(cg => (
+                                                            <span key={cg.id} style={{ display:'inline-flex', alignItems:'center', gap:'3px', fontSize:'11px', fontWeight:'700', color:'#5B2EE8', background:'#EDE8FF', padding:'2px 8px', borderRadius:'50px' }}>
+                                                            <Ic name="group" size={9} color="#5B2EE8"/> {cg.group?.titre}
+                                                        </span>
+                                                        ))
+                                                    }
+                                                </div>
+
+                                                <div style={{ display:'flex', gap:'6px', marginBottom:'12px' }}>
+                                                    <span style={s.pill}><Ic name="layers" size={10} color="#5B2EE8"/> {(c.modules||[]).length} module{(c.modules||[]).length>1?'s':''}</span>
+                                                </div>
+
+                                                <button style={{ ...s.btnPri, width:'100%', justifyContent:'center' }} onClick={() => openCourse(c)}>
+                                                    <Ic name="layers" size={13} color="#fff"/> Gérer les modules
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                 </div>
             )}
 
-            <div style={s.dragInfo}>🖱️ Glissez-déposez les chapitres et tâches pour les réordonner</div>
+            {/* ════ VUE MODULES ════ */}
+            {view === 'modules' && (
+                <div>
+                    <div style={s.breadcrumb}>
+                        <button style={s.breadBtn} onClick={() => setView('courses')}><Ic name="back" size={13} color="#5B2EE8"/> Cours</button>
+                        <span style={s.breadSep}>›</span>
+                        <span style={s.breadCur}>{selCourse?.titre}</span>
+                    </div>
+                    <div style={s.ph}>
+                        <div>
+                            <h1 style={s.h1}>{selCourse?.titre}</h1>
+                            {selCourse?.niveau && <div style={{ fontSize:'13px', color:'#9CA3AF', marginTop:'2px' }}>{selCourse.niveau}</div>}
+                        </div>
+                        <button style={s.btnPri} onClick={() => { setModuleForm({titre:'',description:''}); setEditingModule(null); setShowModuleModal(true); }}>
+                            <Ic name="plus" size={13} color="#fff"/> Nouveau module
+                        </button>
+                    </div>
 
-            {sortedChapters.length === 0 ? (
-                <div style={s.emptyBox}>
-                    <div style={{ fontSize: '36px', marginBottom: '8px' }}>📖</div>
-                    <div style={s.emptyTitle}>Aucun chapitre</div>
-                    {canModify(selectedCourse) && !selectedCourse?.lockedByAdmin && (
-                        <button style={{ ...s.btnP, marginTop: '12px' }} onClick={() => setShowAddChapter(true)}>+ Ajouter</button>
+                    {(selCourse?.modules||[]).length === 0 ? (
+                        <div style={s.emptyState}>
+                            <div style={s.emptyIco}><Ic name="layers" size={36} color="#9CA3AF"/></div>
+                            <div style={s.emptyTitle}>Aucun module</div>
+                            <div style={{ fontSize:'13px', color:'#9CA3AF' }}>Ajoutez un module pour organiser vos leçons</div>
+                        </div>
+                    ) : (
+                        <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                            {(selCourse?.modules||[]).map((mod, idx) => (
+                                <div key={mod.id} style={s.moduleCard}>
+                                    <div style={s.moduleLeft}>
+                                        <div style={s.moduleNum}>{idx+1}</div>
+                                        <div style={{ flex:1 }}>
+                                            <div style={s.moduleTitle}>{mod.titre}</div>
+                                            {mod.description && <div style={s.moduleDesc}>{mod.description}</div>}
+                                            <span style={s.pill}><Ic name="file" size={10} color="#5B2EE8"/> {(mod.chapters||[]).length} leçon{(mod.chapters||[]).length>1?'s':''}</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                                        <button style={s.aBtn} onClick={() => { setModuleForm({titre:mod.titre,description:mod.description||''}); setEditingModule(mod); setShowModuleModal(true); }}>
+                                            <Ic name="edit" size={13} color="#5B2EE8"/>
+                                        </button>
+                                        <button style={{ ...s.aBtn, background:'#FEF2F2' }} onClick={() => deleteModule(mod.id)}>
+                                            <Ic name="trash" size={13} color="#DC2626"/>
+                                        </button>
+                                        <button style={s.btnPri} onClick={() => openModule(mod)}>
+                                            <Ic name="file" size={13} color="#fff"/> Leçons
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     )}
                 </div>
-            ) : sortedChapters.map((chap, ci) => {
-                const sortedTasks = [...(chap.tasks || [])].sort((a, b) => a.ordre - b.ordre);
-                return (
-                    <div key={chap.id} style={s.chapCard}
-                         draggable={canModify(selectedCourse) && !selectedCourse?.lockedByAdmin}
-                         onDragStart={e => handleChapterDragStart(e, ci)}
-                         onDragEnter={e => handleChapterDragEnter(e, ci)}
-                         onDragEnd={handleChapterDragEnd}
-                         onDragOver={e => e.preventDefault()}>
-                        <div style={s.chapHeader}>
-                            {canModify(selectedCourse) && <div style={s.dragHandle}>⠿</div>}
-                            <div style={s.chapNum}>{ci + 1}</div>
-                            <div style={s.chapTitle}>{chap.titre}</div>
-                            <span style={{ fontSize: '12px', color: '#6B7280', fontWeight: '600' }}>{chap.tasks?.length || 0} tâche(s)</span>
-                            {canModify(selectedCourse) && !selectedCourse?.lockedByAdmin && (
-                                <>
-                                    <button style={{ ...s.lockBtn, background: chap.locked ? '#FEF2F2' : '#ECFDF5', color: chap.locked ? '#DC2626' : '#059669', border: `1px solid ${chap.locked ? '#FECACA' : '#BBF7D0'}` }}
-                                            onClick={() => toggleChapter(chap.id)}>
-                                        {chap.locked ? '🔒 Verrouillé' : '🔓 Ouvert'}
-                                    </button>
-                                    <div style={{ display: 'flex', gap: '6px' }}>
-                                        <button style={s.btnSmP} onClick={() => { setSelectedChapter(chap); setShowAddTask(true); }}>+ Tâche</button>
-                                        <button style={s.btnSmD} onClick={() => deleteChapter(chap.id)}>🗑️</button>
+            )}
+
+            {/* ════ VUE LEÇONS ════ */}
+            {view === 'lessons' && (
+                <div>
+                    <div style={s.breadcrumb}>
+                        <button style={s.breadBtn} onClick={() => setView('courses')}><Ic name="back" size={13} color="#5B2EE8"/> Cours</button>
+                        <span style={s.breadSep}>›</span>
+                        <button style={s.breadBtn} onClick={() => setView('modules')}>{selCourse?.titre}</button>
+                        <span style={s.breadSep}>›</span>
+                        <span style={s.breadCur}>{selModule?.titre}</span>
+                    </div>
+                    <div style={s.ph}>
+                        <h1 style={s.h1}>{selModule?.titre}</h1>
+                        <button style={s.btnPri} onClick={() => { setLessonForm({titre:'',objectives:'',teacherGuideUrl:'',studentSlidesUrl:'',imageUrl:'',challengeContent:'',challengeLang:'python'}); setShowLessonModal(true); }}>
+                            <Ic name="plus" size={13} color="#fff"/> Nouvelle leçon
+                        </button>
+                    </div>
+
+                    {(selModule?.chapters||[]).length === 0 ? (
+                        <div style={s.emptyState}>
+                            <div style={s.emptyIco}><Ic name="file" size={36} color="#9CA3AF"/></div>
+                            <div style={s.emptyTitle}>Aucune leçon</div>
+                        </div>
+                    ) : (
+                        <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                            {(selModule?.chapters||[]).map((lesson, idx) => (
+                                <div key={lesson.id} style={s.lessonCard}>
+                                    <div style={s.lessonLeft}>
+                                        <div style={s.lessonNum}>{idx+1}</div>
+                                        <div style={{ flex:1 }}>
+                                            <div style={s.lessonTitle}>{lesson.titre}</div>
+                                            <div style={{ display:'flex', gap:'4px', flexWrap:'wrap', marginTop:'6px' }}>
+                                                {ELEMENTS.map(el => {
+                                                    const has = hasElement(lesson, el.key);
+                                                    return (
+                                                        <span key={el.key} style={{ display:'inline-flex', alignItems:'center', gap:'3px', padding:'2px 7px', borderRadius:'5px', fontSize:'10px', fontWeight:'700', background:has?el.bg:'#F3F4F6', color:has?el.color:'#D1D5DB', border:`1px solid ${has?el.color+'33':'#E5E7EB'}` }}>
+                                                            <Ic name={el.icon} size={9} color={has?el.color:'#D1D5DB'}/> {el.label}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     </div>
-                                </>
+                                    <div style={{ display:'flex', gap:'6px' }}>
+                                        <button style={{ ...s.aBtn, background:'#FEF2F2' }} onClick={() => deleteLesson(lesson.id)}>
+                                            <Ic name="trash" size={13} color="#DC2626"/>
+                                        </button>
+                                        <button style={s.btnPri} onClick={() => openLesson(lesson)}>
+                                            <Ic name="edit" size={13} color="#fff"/> Éditer
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* ════ VUE ÉDITION LEÇON ════ */}
+            {view === 'lesson-edit' && selLesson && (
+                <div>
+                    <div style={s.breadcrumb}>
+                        <button style={s.breadBtn} onClick={() => setView('courses')}><Ic name="back" size={13} color="#5B2EE8"/> Cours</button>
+                        <span style={s.breadSep}>›</span>
+                        <button style={s.breadBtn} onClick={() => setView('modules')}>{selCourse?.titre}</button>
+                        <span style={s.breadSep}>›</span>
+                        <button style={s.breadBtn} onClick={() => setView('lessons')}>{selModule?.titre}</button>
+                        <span style={s.breadSep}>›</span>
+                        <span style={s.breadCur}>{selLesson.titre}</span>
+                    </div>
+                    <div style={s.ph}>
+                        <h1 style={s.h1}>✏️ {selLesson.titre}</h1>
+                        <button style={s.btnPri} onClick={saveLesson} disabled={saving}>
+                            <Ic name="save" size={13} color="#fff"/> {saving?'Sauvegarde...':'Sauvegarder'}
+                        </button>
+                    </div>
+
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px' }}>
+
+                        {/* Titre */}
+                        <div style={{ ...s.card, gridColumn:'1/-1' }}>
+                            <div style={s.cardH}><Ic name="file" size={14} color="#5B2EE8"/> Titre de la leçon</div>
+                            <Inp value={lessonForm.titre} onChange={e => setLessonForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Leçon 1 — Introduction"/>
+                        </div>
+
+                        {/* Objectifs */}
+                        <div style={s.card}>
+                            <div style={s.cardH}><Ic name="target" size={14} color="#8B5CF6"/> Objectifs <span style={s.opt}>optionnel</span></div>
+                            <Txt value={lessonForm.objectives} onChange={e => setLessonForm(f=>({...f,objectives:e.target.value}))} placeholder="À la fin de cette leçon, l'élève saura..."/>
+                        </div>
+
+                        {/* Image */}
+                        <div style={s.card}>
+                            <div style={s.cardH}><Ic name="image" size={14} color="#059669"/> Image illustrative <span style={s.opt}>optionnel</span></div>
+                            <Inp value={lessonForm.imageUrl} onChange={e => setLessonForm(f=>({...f,imageUrl:e.target.value}))} placeholder="https://..."/>
+                            {lessonForm.imageUrl && (
+                                <div style={{ marginTop:'8px', borderRadius:'8px', overflow:'hidden', border:'1px solid #E5E7EB' }}>
+                                    <img src={lessonForm.imageUrl} alt="preview" style={{ width:'100%', maxHeight:'140px', objectFit:'cover' }} onError={e=>e.target.style.display='none'}/>
+                                </div>
                             )}
                         </div>
 
-                        <div style={{ padding: '8px 20px' }}>
-                            {sortedTasks.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '14px', color: '#9CA3AF', fontSize: '13px' }}>Aucune tâche</div>
-                            ) : sortedTasks.map((task, ti) => {
-                                const tc = typeConfig[task.type] || typeConfig.SLIDE;
-                                return (
-                                    <div key={task.id} style={s.taskItem}
-                                         draggable={canModify(selectedCourse) && !selectedCourse?.lockedByAdmin}
-                                         onDragStart={e => handleTaskDragStart(e, ti)}
-                                         onDragEnter={e => handleTaskDragEnter(e, ti)}
-                                         onDragEnd={() => handleTaskDragEnd(chap)}
-                                         onDragOver={e => e.preventDefault()}>
-                                        {canModify(selectedCourse) && <div style={s.dragHandleSm}>⠿</div>}
-                                        <div style={{ ...s.taskIcon, background: tc.bg }}>
-                                            <span style={{ fontSize: '18px' }}>{tc.emoji}</span>
-                                        </div>
-                                        <div style={{ flex: 1 }}>
-                                            <div style={{ fontSize: '13px', fontWeight: '700', color: '#1A1040', marginBottom: '3px' }}>{task.titre}</div>
-                                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                                <span style={{ ...s.pill, background: tc.bg, color: tc.color }}>{tc.emoji} {tc.label}</span>
-                                                {task.contenuUrl && <span style={{ fontSize: '11px', color: '#6B7280' }}>🔗 Lien</span>}
-                                                {task.scriptLanguage && task.type === 'SCRIPT' && (
-                                                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#0284C7', background: '#E0F2FE', padding: '2px 7px', borderRadius: '5px' }}>{task.scriptLanguage}</span>
-                                                )}
-                                                {task.questions?.length > 0 && <span style={{ fontSize: '11px', color: '#059669', fontWeight: '700' }}>{task.questions.length} Q</span>}
+                        {/* Teacher Guide */}
+                        <div style={{ ...s.card, borderColor:'#BAE6FD' }}>
+                            <div style={s.cardH}>
+                                <Ic name="teacher" size={14} color="#0284C7"/> Guide Professeur
+                                <span style={{ fontSize:'10px', fontWeight:'800', color:'#0284C7', background:'#E0F2FE', padding:'2px 6px', borderRadius:'4px' }}>🔒 Prof only</span>
+                                <span style={s.opt}>optionnel</span>
+                            </div>
+                            <Inp value={lessonForm.teacherGuideUrl} onChange={e => setLessonForm(f=>({...f,teacherGuideUrl:e.target.value}))} placeholder="https://docs.google.com/presentation/..."/>
+                        </div>
+
+                        {/* Student Slides */}
+                        <div style={{ ...s.card, borderColor:'#C4B5FD' }}>
+                            <div style={s.cardH}><Ic name="slide" size={14} color="#5B2EE8"/> Slides Élèves <span style={s.opt}>optionnel</span></div>
+                            <Inp value={lessonForm.studentSlidesUrl} onChange={e => setLessonForm(f=>({...f,studentSlidesUrl:e.target.value}))} placeholder="https://docs.google.com/presentation/..."/>
+                        </div>
+
+                        {/* Challenge */}
+                        <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#FECACA' }}>
+                            <div style={s.cardH}><Ic name="code" size={14} color="#DC2626"/> Challenge / Script <span style={s.opt}>optionnel</span></div>
+                            <select style={{ ...s.select, marginBottom:'8px', width:'160px' }} value={lessonForm.challengeLang} onChange={e => setLessonForm(f=>({...f,challengeLang:e.target.value}))}>
+                                {['python','javascript','html','css','scratch'].map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase()+l.slice(1)}</option>)}
+                            </select>
+                            <Txt value={lessonForm.challengeContent} onChange={e => setLessonForm(f=>({...f,challengeContent:e.target.value}))} placeholder="# Code ici..." style={{ fontFamily:'monospace', fontSize:'13px', minHeight:'120px', background:'#0F172A', color:'#E2E8F0', border:'1px solid #374151' }}/>
+                        </div>
+
+                        {/* Quiz */}
+                        <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#FDE68A' }}>
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
+                                <div style={s.cardH}><Ic name="qcm" size={14} color="#D97706"/> Quiz <span style={{ fontSize:'12px', color:'#9CA3AF', fontWeight:'400' }}>({(selLesson.quizQuestions||[]).length} questions)</span> <span style={s.opt}>optionnel</span></div>
+                                <button style={{ ...s.btnSec, borderColor:'#FDE68A', color:'#D97706' }}
+                                        onClick={() => { setQuizForm({question:'',options:['','','',''],correct:0}); setEditingQuestion(null); setShowQuizModal(true); }}>
+                                    <Ic name="plus" size={13} color="#D97706"/> Ajouter une question
+                                </button>
+                            </div>
+
+                            {(selLesson.quizQuestions||[]).length === 0 ? (
+                                <div style={{ textAlign:'center', padding:'24px', color:'#D1D5DB', fontSize:'13px' }}>
+                                    Aucune question — cliquez sur "Ajouter une question"
+                                </div>
+                            ) : (
+                                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                                    {(selLesson.quizQuestions||[]).map((q, qi) => (
+                                        <div key={q.id} style={{ background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:'10px', padding:'14px' }}>
+                                            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'10px' }}>
+                                                <div style={{ flex:1 }}>
+                                                    <div style={{ fontSize:'13px', fontWeight:'700', color:'#111827', marginBottom:'8px' }}>Q{qi+1}. {q.question}</div>
+                                                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px' }}>
+                                                        {q.options.map((opt, oi) => (
+                                                            <div key={oi} style={{ display:'flex', alignItems:'center', gap:'6px', padding:'5px 8px', borderRadius:'6px', background:oi===q.correct?'#ECFDF5':'#fff', border:`1px solid ${oi===q.correct?'#A7F3D0':'#E5E7EB'}` }}>
+                                                                <span style={{ width:'18px', height:'18px', borderRadius:'4px', background:oi===q.correct?'#059669':'#E5E7EB', color:oi===q.correct?'#fff':'#6B7280', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'800', flexShrink:0 }}>{['A','B','C','D'][oi]}</span>
+                                                                <span style={{ fontSize:'12px', color:oi===q.correct?'#059669':'#374151' }}>{opt}</span>
+                                                                {oi===q.correct && <Ic name="check" size={11} color="#059669"/>}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div style={{ display:'flex', gap:'4px', flexShrink:0 }}>
+                                                    <button style={s.aBtn} onClick={() => { setQuizForm({question:q.question,options:[...q.options],correct:q.correct}); setEditingQuestion(q); setShowQuizModal(true); }}>
+                                                        <Ic name="edit" size={13} color="#5B2EE8"/>
+                                                    </button>
+                                                    <button style={{ ...s.aBtn, background:'#FEF2F2' }} onClick={() => deleteQuestion(q.id)}>
+                                                        <Ic name="trash" size={13} color="#DC2626"/>
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
-                                        {canModify(selectedCourse) && !selectedCourse?.lockedByAdmin && (
-                                            <>
-                                                <button style={{ ...s.lockBtnSm, background: task.locked ? '#FEF2F2' : '#ECFDF5', color: task.locked ? '#DC2626' : '#059669', border: `1px solid ${task.locked ? '#FECACA' : '#BBF7D0'}` }}
-                                                        onClick={() => toggleTask(task.id)}>
-                                                    {task.locked ? '🔒' : '🔓'}
-                                                </button>
-                                                <button style={s.btnSmD} onClick={() => deleteTask(task.id)}>🗑️</button>
-                                            </>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                );
-            })}
-
-            {/* Modal Add Chapter */}
-            {showAddChapter && (
-                <div style={s.modalBg} onClick={() => setShowAddChapter(false)}>
-                    <div style={s.modal} onClick={e => e.stopPropagation()}>
-                        <h2 style={s.modalTitle}>📖 Nouveau chapitre</h2>
-                        <div style={s.fg}><label style={s.fl}>Titre *</label>
-                            <input style={s.fi} placeholder="ex: 1. Les bases de Python" value={chapterForm.titre} onChange={e => setChapterForm({ titre: e.target.value })} /></div>
-                        <div style={s.modalFoot}>
-                            <button style={s.btnO} onClick={() => setShowAddChapter(false)}>Annuler</button>
-                            <button style={s.btnP} onClick={createChapter}>Créer</button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Modal Add Task — avec SCRIPT */}
-            {showAddTask && (
-                <div style={s.modalBg} onClick={() => setShowAddTask(false)}>
+            {/* ════ MODAL COURS ════ */}
+            {showCourseModal && (
+                <div style={s.overlay} onClick={() => setShowCourseModal(false)}>
                     <div style={s.modal} onClick={e => e.stopPropagation()}>
-                        <h2 style={s.modalTitle}>Nouvelle tâche</h2>
-                        <div style={{ background: '#F8F6FF', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#5B2EE8', fontWeight: '600' }}>
-                            📖 {selectedChapter?.titre}
-                        </div>
+                        <h2 style={s.modalTitle}>{editingCourse ? 'Modifier le cours' : 'Nouveau cours'}</h2>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
 
-                        <div style={s.fg}><label style={s.fl}>Titre *</label>
-                            <input style={s.fi} placeholder="ex: Introduction à Python" value={taskForm.titre} onChange={e => setTaskForm({ ...taskForm, titre: e.target.value })} /></div>
+                            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                <label style={s.lbl}>Titre *</label>
+                                <Inp value={courseForm.titre} onChange={e => setCourseForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Minecraft Game Design"/>
+                            </div>
 
-                        {/* Sélecteur de type — 4 options avec SCRIPT */}
-                        <div style={s.fg}>
-                            <label style={s.fl}>Type</label>
-                            <div style={s.typeGrid}>
-                                {Object.entries(typeConfig).map(([type, tc]) => (
-                                    <div key={type} style={{ ...s.typeCard, border: taskForm.type === type ? `2px solid ${tc.color}` : '2px solid #E5E0F5', background: taskForm.type === type ? tc.bg : '#fff' }}
-                                         onClick={() => setTaskForm({ ...taskForm, type })}>
-                                        <div style={{ fontSize: '26px', marginBottom: '4px' }}>{tc.emoji}</div>
-                                        <div style={{ fontSize: '13px', fontWeight: '800', color: taskForm.type === type ? tc.color : '#1A1040' }}>{tc.label}</div>
-                                        <div style={{ fontSize: '11px', color: '#6B7280', textAlign: 'center', lineHeight: 1.3 }}>{tc.desc}</div>
+                            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                                <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                    <label style={s.lbl}>Niveau</label>
+                                    <Inp value={courseForm.niveau} onChange={e => setCourseForm(f=>({...f,niveau:e.target.value}))} placeholder="ex: 8-12 ans"/>
+                                </div>
+                                <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                    <label style={s.lbl}>Description</label>
+                                    <Inp value={courseForm.description} onChange={e => setCourseForm(f=>({...f,description:e.target.value}))} placeholder="Brève description..."/>
+                                </div>
+                            </div>
+
+                            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                <label style={s.lbl}>🖼️ Image de couverture (URL)</label>
+                                <Inp value={courseForm.coverImage} onChange={e => setCourseForm(f=>({...f,coverImage:e.target.value}))} placeholder="https://images.unsplash.com/..."/>
+                                {courseForm.coverImage && (
+                                    <div style={{ borderRadius:'8px', overflow:'hidden', border:'1px solid #E5E7EB', marginTop:'4px' }}>
+                                        <img src={courseForm.coverImage} alt="cover preview" style={{ width:'100%', height:'120px', objectFit:'cover' }} onError={e => e.target.style.display='none'}/>
                                     </div>
-                                ))}
+                                )}
+                            </div>
+
+                            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                <label style={s.lbl}><Ic name="group" size={11} color="#5B2EE8"/> Groupes assignés</label>
+                                <GroupSelector
+                                    selectedIds={courseForm.groupIds}
+                                    onChange={ids => setCourseForm(f => ({...f, groupIds:ids}))}
+                                    groups={groups}
+                                />
+                                {courseForm.groupIds.length > 0 && (
+                                    <div style={{ fontSize:'12px', color:'#059669', fontWeight:'600', marginTop:'2px' }}>
+                                        ✅ {courseForm.groupIds.length} groupe{courseForm.groupIds.length>1?'s':''} sélectionné{courseForm.groupIds.length>1?'s':''}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
-                        {/* Champs selon le type */}
-                        {taskForm.type === 'SLIDE' && (
-                            <div style={s.fg}><label style={s.fl}>Lien Google Slides</label>
-                                <input style={s.fi} placeholder="https://docs.google.com/presentation/..." value={taskForm.contenuUrl} onChange={e => setTaskForm({ ...taskForm, contenuUrl: e.target.value })} /></div>
-                        )}
-                        {taskForm.type === 'DEVOIR' && (
-                            <div style={s.fg}><label style={s.fl}>Sujet / Instructions</label>
-                                <textarea style={{ ...s.fi, minHeight: '80px', resize: 'vertical' }} placeholder="Décrivez le sujet..." value={taskForm.description} onChange={e => setTaskForm({ ...taskForm, description: e.target.value })} /></div>
-                        )}
-                        {taskForm.type === 'QCM' && (
-                            <div style={s.infoBox}>✅ Après création vous pourrez ajouter les questions</div>
-                        )}
-                        {taskForm.type === 'SCRIPT' && (
-                            <>
-                                <div style={s.fg}>
-                                    <label style={s.fl}>Langage</label>
-                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                        {['python', 'javascript', 'html', 'css', 'scratch'].map(lang => (
-                                            <button key={lang} type="button"
-                                                    style={{ padding: '6px 14px', borderRadius: '8px', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit', border: taskForm.scriptLanguage === lang ? '2px solid #0284C7' : '2px solid #E5E0F5', background: taskForm.scriptLanguage === lang ? '#E0F2FE' : '#fff', color: taskForm.scriptLanguage === lang ? '#0284C7' : '#6B7280' }}
-                                                    onClick={() => setTaskForm({ ...taskForm, scriptLanguage: lang })}>
-                                                {lang.charAt(0).toUpperCase() + lang.slice(1)}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div style={s.fg}>
-                                    <label style={s.fl}>Instructions (optionnel)</label>
-                                    <textarea style={{ ...s.fi, minHeight: '60px', resize: 'vertical' }} placeholder="Expliquez ce que doit faire le script..." value={taskForm.description} onChange={e => setTaskForm({ ...taskForm, description: e.target.value })} />
-                                </div>
-                                <div style={s.fg}>
-                                    <label style={s.fl}>Code du script</label>
-                                    <textarea style={{ ...s.fi, minHeight: '160px', resize: 'vertical', fontFamily: 'Courier New, monospace', fontSize: '13px', lineHeight: 1.6 }}
-                                              placeholder={taskForm.scriptLanguage === 'python' ? '# Écrivez votre code Python ici\nprint("Hello, World!")' : taskForm.scriptLanguage === 'javascript' ? '// Votre code JavaScript\nconsole.log("Hello!");' : '<!-- Votre code HTML -->'}
-                                              value={taskForm.scriptContent}
-                                              onChange={e => setTaskForm({ ...taskForm, scriptContent: e.target.value })} />
-                                </div>
-                            </>
-                        )}
-
-                        <div style={s.modalFoot}>
-                            <button style={s.btnO} onClick={() => setShowAddTask(false)}>Annuler</button>
-                            <button style={s.btnP} onClick={createTask}>
-                                <span style={{ fontSize: '14px' }}>💾</span>
-                                {taskForm.type === 'QCM' ? 'Créer → Questions' : 'Créer'}
+                        <div style={s.mFoot}>
+                            <button style={s.btnSec} onClick={() => setShowCourseModal(false)}>Annuler</button>
+                            <button style={s.btnPri} onClick={saveCourse} disabled={saving}>
+                                {saving ? 'Sauvegarde...' : editingCourse ? '💾 Modifier' : '✅ Créer le cours'}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* QCM Editor */}
-            {showQcmEditor && (
-                <div style={s.modalBg}>
-                    <div style={{ ...s.modal, width: '700px', maxHeight: '85vh', overflowY: 'auto' }}>
-                        <h2 style={s.modalTitle}>✅ Questions QCM — {editingTask?.titre}</h2>
-                        {questions.map((q, qi) => (
-                            <div key={qi} style={s.qCard}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-                                    <div style={s.qNum}>Q{qi + 1}</div>
-                                    <input style={{ ...s.fi, flex: 1 }} placeholder={`Question ${qi + 1}`} value={q.question} onChange={e => updateQuestion(qi, 'question', e.target.value)} />
-                                    {questions.length > 1 && <button style={s.btnSmD} onClick={() => removeQuestion(qi)}>🗑️</button>}
-                                </div>
-                                <div style={s.optionsGrid}>
-                                    {q.options.map((opt, oi) => (
-                                        <div key={oi} style={{ ...s.optionRow, background: q.correct === oi ? '#ECFDF5' : '#F8F6FF', border: `1.5px solid ${q.correct === oi ? '#A7F3D0' : '#E5E0F5'}` }}>
-                                            <div style={{ ...s.optionLetter, background: q.correct === oi ? '#059669' : '#E5E7EB', color: q.correct === oi ? '#fff' : '#6B7280' }}>{['A','B','C','D'][oi]}</div>
-                                            <input style={s.optionInput} placeholder={`Option ${['A','B','C','D'][oi]}`} value={opt} onChange={e => updateOption(qi, oi, e.target.value)} />
-                                            <button style={{ ...s.correctBtn, background: q.correct === oi ? '#059669' : 'transparent', color: q.correct === oi ? '#fff' : '#9CA3AF' }}
-                                                    onClick={() => updateQuestion(qi, 'correct', oi)}>
-                                                {q.correct === oi ? '✅' : '○'}
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
+            {/* ════ MODAL MODULE ════ */}
+            {showModuleModal && (
+                <div style={s.overlay} onClick={() => setShowModuleModal(false)}>
+                    <div style={s.modal} onClick={e => e.stopPropagation()}>
+                        <h2 style={s.modalTitle}>{editingModule ? 'Modifier le module' : 'Nouveau module'}</h2>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                <label style={s.lbl}>Titre *</label>
+                                <Inp value={moduleForm.titre} onChange={e => setModuleForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Module 1 — Crafto Minecraft"/>
                             </div>
-                        ))}
-                        <button style={{ ...s.btnO, width: '100%', marginBottom: '16px' }} onClick={addQuestion}>+ Question</button>
-                        <div style={s.modalFoot}>
-                            <button style={s.btnO} onClick={() => { setShowQcmEditor(false); refreshCourse(selectedCourse.id); }}>Annuler</button>
-                            <button style={s.btnP} onClick={saveQcm}>💾 Sauvegarder ({questions.length} Q)</button>
+                            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                <label style={s.lbl}>Description</label>
+                                <Txt value={moduleForm.description} onChange={e => setModuleForm(f=>({...f,description:e.target.value}))} placeholder="Description du module..."/>
+                            </div>
+                        </div>
+                        <div style={s.mFoot}>
+                            <button style={s.btnSec} onClick={() => setShowModuleModal(false)}>Annuler</button>
+                            <button style={s.btnPri} onClick={saveModule} disabled={saving}>{saving?'Sauvegarde...':'Sauvegarder'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ════ MODAL LEÇON ════ */}
+            {showLessonModal && (
+                <div style={s.overlay} onClick={() => setShowLessonModal(false)}>
+                    <div style={s.modal} onClick={e => e.stopPropagation()}>
+                        <h2 style={s.modalTitle}>Nouvelle leçon</h2>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginBottom:'8px' }}>
+                            <label style={s.lbl}>Titre *</label>
+                            <Inp value={lessonForm.titre} onChange={e => setLessonForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Leçon 1 — Introduction"/>
+                        </div>
+                        <p style={{ fontSize:'12px', color:'#9CA3AF' }}>💡 Ajoutez les objectifs, slides, quiz et challenge après création.</p>
+                        <div style={s.mFoot}>
+                            <button style={s.btnSec} onClick={() => setShowLessonModal(false)}>Annuler</button>
+                            <button style={s.btnPri} onClick={saveLesson} disabled={saving}>{saving?'Création...':'Créer'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ════ MODAL QUIZ ════ */}
+            {showQuizModal && (
+                <div style={s.overlay} onClick={() => setShowQuizModal(false)}>
+                    <div style={{ ...s.modal, maxWidth:'560px' }} onClick={e => e.stopPropagation()}>
+                        <h2 style={s.modalTitle}>{editingQuestion ? 'Modifier la question' : 'Nouvelle question'}</h2>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                                <label style={s.lbl}>Question *</label>
+                                <Txt value={quizForm.question} onChange={e => setQuizForm(f=>({...f,question:e.target.value}))} placeholder="Quelle est la bonne réponse ?" style={{ minHeight:'60px' }}/>
+                            </div>
+                            {['A','B','C','D'].map((letter, oi) => (
+                                <div key={oi} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                                    <div style={{ width:'30px', height:'30px', borderRadius:'8px', background:quizForm.correct===oi?'#059669':'#E5E7EB', color:quizForm.correct===oi?'#fff':'#6B7280', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:'800', flexShrink:0, cursor:'pointer' }}
+                                         onClick={() => setQuizForm(f=>({...f,correct:oi}))}>
+                                        {letter}
+                                    </div>
+                                    <Inp value={quizForm.options[oi]} onChange={e => { const opts=[...quizForm.options]; opts[oi]=e.target.value; setQuizForm(f=>({...f,options:opts})); }} placeholder={`Option ${letter}`} style={{ flex:1, width:'auto', border:quizForm.correct===oi?'1.5px solid #059669':undefined }}/>
+                                    {quizForm.correct===oi && <span style={{ fontSize:'11px', color:'#059669', fontWeight:'700', whiteSpace:'nowrap' }}>✓ Bonne réponse</span>}
+                                </div>
+                            ))}
+                            <p style={{ fontSize:'12px', color:'#9CA3AF' }}>💡 Cliquez sur la lettre pour choisir la bonne réponse</p>
+                        </div>
+                        <div style={s.mFoot}>
+                            <button style={s.btnSec} onClick={() => setShowQuizModal(false)}>Annuler</button>
+                            <button style={s.btnPri} onClick={saveQuestion} disabled={saving}>{saving?'Sauvegarde...':'Sauvegarder'}</button>
                         </div>
                     </div>
                 </div>
@@ -578,62 +791,41 @@ export default function MyCourses() {
     );
 }
 
-const gs = {
-    wrap: { display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto', border: '1.5px solid #E5E0F5', borderRadius: '9px', padding: '8px', background: '#F8F6FF' },
-    item: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.15s' },
-    name: { fontSize: '13px', fontWeight: '600', color: '#1A1040' },
-};
-
+// ── Styles ──────────────────────────────────────────────────
 const s = {
-    ph:           { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' },
-    h1:           { fontFamily: 'sans-serif', fontSize: '22px', fontWeight: '800', color: '#1A1040', flex: 1 },
-    btnP:         { display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '8px 18px', background: '#5B2EE8', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 },
-    btnO:         { padding: '8px 18px', background: 'transparent', border: '1.5px solid #E5E0F5', borderRadius: '8px', color: '#1A1040', fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
-    btnSmP:       { padding: '5px 12px', background: '#5B2EE8', border: 'none', borderRadius: '6px', color: '#fff', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
-    btnSmD:       { padding: '5px 10px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', color: '#DC2626', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
-    btnSmE:       { padding: '5px 10px', border: 'none', borderRadius: '6px', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
-    lockBtn:      { padding: '5px 12px', borderRadius: '6px', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
-    lockBtnSm:    { padding: '5px 10px', borderRadius: '6px', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
-    lockedBanner: { background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '10px', padding: '12px 16px', fontSize: '13px', color: '#DC2626', fontWeight: '700', marginBottom: '14px' },
-    dragInfo:     { background: '#F8F6FF', border: '1px dashed #C4B5FD', borderRadius: '8px', padding: '8px 14px', fontSize: '12px', color: '#5B2EE8', fontWeight: '600', marginBottom: '16px' },
-    dragHandle:   { cursor: 'grab', fontSize: '18px', color: '#9CA3AF', marginRight: '4px', userSelect: 'none' },
-    dragHandleSm: { cursor: 'grab', fontSize: '16px', color: '#9CA3AF', userSelect: 'none' },
-    empty:        { textAlign: 'center', padding: '60px', color: '#6B7280' },
-    emptyBox:     { background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', padding: '48px', textAlign: 'center' },
-    emptyTitle:   { fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '800', color: '#1A1040', marginBottom: '8px' },
-    grid:         { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px,1fr))', gap: '16px' },
-    card:         { background: '#fff', borderRadius: '14px', padding: '20px' },
-    cardTop:      { display: 'flex', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '6px' },
-    cardIcon:     { width: '44px', height: '44px', background: '#EDE8FF', borderRadius: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' },
-    cardTitle:    { fontFamily: 'sans-serif', fontSize: '16px', fontWeight: '800', color: '#1A1040', marginBottom: '6px' },
-    cardDesc:     { fontSize: '12px', color: '#6B7280', marginBottom: '10px', lineHeight: 1.5 },
-    cardBtn:      { padding: '7px 14px', background: '#F5F2FF', border: '1.5px solid #EDE8FF', borderRadius: '8px', color: '#5B2EE8', fontWeight: '700', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
-    adminLockBadge: { background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: '800', color: '#DC2626', marginBottom: '8px', display: 'inline-block' },
-    groupTag:     { display: 'inline-flex', padding: '2px 8px', borderRadius: '50px', fontSize: '11px', fontWeight: '800', background: '#EDE8FF', color: '#5B2EE8' },
-    noGroup:      { fontSize: '11px', color: '#9CA3AF', fontStyle: 'italic' },
-    pill:         { display: 'inline-flex', padding: '2px 8px', borderRadius: '50px', fontSize: '11px', fontWeight: '800' },
-    chapCard:     { background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', marginBottom: '12px', overflow: 'hidden' },
-    chapHeader:   { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid #E5E0F5', background: '#F8F6FF', flexWrap: 'wrap' },
-    chapNum:      { width: '26px', height: '26px', background: '#5B2EE8', color: '#fff', borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '12px', flexShrink: 0 },
-    chapTitle:    { fontFamily: 'sans-serif', fontSize: '14px', fontWeight: '800', color: '#1A1040', flex: 1 },
-    taskItem:     { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 0', borderBottom: '1px solid #F3F4F6' },
-    taskIcon:     { width: '36px', height: '36px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-    // Type selector — grille 2x2 pour 4 types
-    typeGrid:     { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
-    typeCard:     { padding: '14px 10px', borderRadius: '10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', transition: 'all 0.15s' },
-    infoBox:      { background: '#ECFDF5', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: '#059669', fontWeight: '600', marginBottom: '8px' },
-    qCard:        { background: '#F8F6FF', borderRadius: '12px', padding: '16px', marginBottom: '14px', border: '1px solid #E5E0F5' },
-    qNum:         { width: '28px', height: '28px', background: '#5B2EE8', color: '#fff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '12px', flexShrink: 0 },
-    optionsGrid:  { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' },
-    optionRow:    { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '8px' },
-    optionLetter: { width: '24px', height: '24px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '11px', flexShrink: 0 },
-    optionInput:  { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#1A1040', fontFamily: 'inherit' },
-    correctBtn:   { width: '28px', height: '28px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', flexShrink: 0 },
-    modalBg:      { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-    modal:        { background: '#fff', borderRadius: '16px', padding: '32px', width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto' },
-    modalTitle:   { fontFamily: 'sans-serif', fontSize: '20px', fontWeight: '800', color: '#1A1040', marginBottom: '20px' },
-    modalFoot:    { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' },
-    fg:           { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' },
-    fl:           { fontSize: '11px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' },
-    fi:           { padding: '10px 12px', border: '1.5px solid #E5E0F5', borderRadius: '9px', fontSize: '13px', color: '#1A1040', outline: 'none', background: '#F8F6FF', fontFamily: 'inherit' },
+    ph:         { display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'20px', flexWrap:'wrap', gap:'12px' },
+    h1:         { fontFamily:'sans-serif', fontSize:'22px', fontWeight:'800', color:'#1A1040', margin:0 },
+    breadcrumb: { display:'flex', alignItems:'center', gap:'6px', marginBottom:'16px', fontSize:'13px' },
+    breadBtn:   { background:'none', border:'none', color:'#5B2EE8', fontWeight:'700', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', display:'flex', alignItems:'center', gap:'4px', padding:'4px 8px', borderRadius:'6px' },
+    breadSep:   { color:'#D1D5DB', fontWeight:'700' },
+    breadCur:   { color:'#374151', fontWeight:'700' },
+    btnPri:     { display:'inline-flex', alignItems:'center', gap:'6px', padding:'9px 18px', background:'#5B2EE8', border:'none', borderRadius:'9px', color:'#fff', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 },
+    btnSec:     { display:'inline-flex', alignItems:'center', gap:'6px', padding:'9px 16px', background:'#EDE8FF', border:'1px solid #C4B5FD', borderRadius:'9px', color:'#5B2EE8', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' },
+    aBtn:       { width:'30px', height:'30px', borderRadius:'7px', border:'none', background:'#EDE8FF', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0 },
+    iconBtn:    { width:'28px', height:'28px', borderRadius:'7px', border:'none', background:'rgba(0,0,0,0.3)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' },
+    pill:       { display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'11px', fontWeight:'700', color:'#5B2EE8', background:'#EDE8FF', padding:'3px 8px', borderRadius:'50px' },
+    empty:      { textAlign:'center', padding:'40px', color:'#9CA3AF' },
+    emptyState: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px', gap:'12px' },
+    emptyIco:   { width:'72px', height:'72px', background:'#F3F4F6', borderRadius:'20px', display:'flex', alignItems:'center', justifyContent:'center' },
+    emptyTitle: { fontFamily:'sans-serif', fontSize:'18px', fontWeight:'800', color:'#1A1040' },
+    courseGrid: { display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px,1fr))', gap:'18px' },
+    courseCard: { background:'#fff', borderRadius:'16px', overflow:'hidden', border:'1px solid #E5E7EB', boxShadow:'0 2px 8px rgba(0,0,0,0.06)' },
+    moduleCard: { background:'#fff', border:'1px solid #E5E7EB', borderRadius:'12px', padding:'16px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' },
+    moduleLeft: { display:'flex', alignItems:'flex-start', gap:'12px', flex:1 },
+    moduleNum:  { width:'36px', height:'36px', background:'linear-gradient(135deg,#5B2EE8,#8B5CF6)', borderRadius:'10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', fontWeight:'800', color:'#fff', flexShrink:0 },
+    moduleTitle:{ fontSize:'15px', fontWeight:'800', color:'#1A1040', marginBottom:'2px' },
+    moduleDesc: { fontSize:'12px', color:'#9CA3AF', marginBottom:'4px' },
+    lessonCard: { background:'#fff', border:'1px solid #E5E7EB', borderRadius:'10px', padding:'14px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px' },
+    lessonLeft: { display:'flex', alignItems:'flex-start', gap:'10px', flex:1 },
+    lessonNum:  { width:'30px', height:'30px', background:'#EDE8FF', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:'800', color:'#5B2EE8', flexShrink:0 },
+    lessonTitle:{ fontSize:'14px', fontWeight:'700', color:'#1A1040' },
+    card:       { background:'#fff', border:'1.5px solid #E5E7EB', borderRadius:'12px', padding:'16px' },
+    cardH:      { display:'flex', alignItems:'center', gap:'6px', fontSize:'13px', fontWeight:'700', color:'#374151', marginBottom:'12px' },
+    opt:        { fontSize:'10px', fontWeight:'600', color:'#9CA3AF', background:'#F3F4F6', padding:'2px 6px', borderRadius:'4px', marginLeft:'auto' },
+    select:     { padding:'9px 12px', border:'1.5px solid #E5E7EB', borderRadius:'8px', fontSize:'13px', color:'#111827', outline:'none', background:'#fff', fontFamily:'inherit' },
+    overlay:    { position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', backdropFilter:'blur(4px)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' },
+    modal:      { background:'#fff', borderRadius:'16px', padding:'28px', width:'100%', maxWidth:'520px', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.15)' },
+    modalTitle: { fontFamily:'sans-serif', fontSize:'18px', fontWeight:'800', color:'#111827', margin:'0 0 18px' },
+    mFoot:      { display:'flex', justifyContent:'flex-end', gap:'8px', marginTop:'20px', paddingTop:'16px', borderTop:'1px solid #E5E7EB' },
+    lbl:        { fontSize:'11px', fontWeight:'700', color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.5px' },
 };
