@@ -239,7 +239,7 @@ router.delete('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) 
 // MODULES
 // ─────────────────────────────────────────────
 
-// POST créer un module
+// POST créer un modul
 router.post('/:id/modules', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { titre, description } = req.body;
     try {
