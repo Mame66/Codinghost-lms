@@ -2,8 +2,50 @@ const express = require('express');
 const router = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
 const { PrismaClient } = require('@prisma/client');
+const { sendAbsenceEmail, sendSafe } = require('../services/emailService');
 
 const prisma = new PrismaClient();
+
+// ── Helper : envoyer email absence ───────────────────────
+const notifyAbsence = async (enrollmentId, date, prisma, req) => {
+    try {
+        const enrollment = await prisma.enrollment.findUnique({
+            where: { id: parseInt(enrollmentId) },
+            include: {
+                student: {
+                    include: {
+                        user: { select: { nom: true, prenom: true } }
+                    }
+                },
+                group: { select: { titre: true } }
+            }
+        });
+
+        if (!enrollment) return;
+
+        const parentEmail = enrollment.student?.parentEmail;
+        if (!parentEmail || parentEmail.includes('@codinghost.fr')) return;
+
+        const studentName = `${enrollment.student?.user?.prenom} ${enrollment.student?.user?.nom}`;
+        const teacherName = req.user ? `${req.user.prenom} ${req.user.nom}` : '';
+
+        await sendSafe(
+            () => sendAbsenceEmail({
+                to:          parentEmail,
+                parentName:  enrollment.student?.parentNom || '',
+                studentName,
+                groupName:   enrollment.group?.titre || '',
+                date:        date || new Date(),
+                teacherName,
+            }),
+            { type:'ABSENCE', to:parentEmail, subject:`Absence signalée — ${studentName}` },
+            prisma
+        );
+        console.log(`✅ Email absence envoyé à ${parentEmail} pour ${studentName}`);
+    } catch (err) {
+        console.error('Erreur email absence:', err.message);
+    }
+};
 
 // GET présences d'un groupe
 router.get('/group/:groupId', protect, async (req, res) => {
@@ -31,7 +73,6 @@ router.get('/group/:groupId', protect, async (req, res) => {
 router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { enrollmentId, date, statut } = req.body;
     try {
-        // Vérifier si présence existe déjà pour cette date
         const dateObj = new Date(date);
         dateObj.setHours(0, 0, 0, 0);
         const nextDay = new Date(dateObj);
@@ -44,33 +85,42 @@ router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
             }
         });
 
+        let result;
+        const wasAbsent = existing?.statut !== 'ABSENT' && statut === 'ABSENT';
+
         if (existing) {
-            const updated = await prisma.attendance.update({
+            result = await prisma.attendance.update({
                 where: { id: existing.id },
                 data: { statut }
             });
-            return res.json(updated);
+        } else {
+            result = await prisma.attendance.create({
+                data: {
+                    enrollmentId: parseInt(enrollmentId),
+                    date: new Date(date),
+                    statut: statut || 'PRESENT'
+                }
+            });
         }
 
-        const attendance = await prisma.attendance.create({
-            data: {
-                enrollmentId: parseInt(enrollmentId),
-                date: new Date(date),
-                statut: statut || 'PRESENT'
-            }
-        });
-        res.status(201).json(attendance);
+        // ✅ Email absence si statut ABSENT
+        if (statut === 'ABSENT') {
+            await notifyAbsence(enrollmentId, date, prisma, req);
+        }
+
+        return res.status(existing ? 200 : 201).json(result);
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
 
-// POST marquer présence pour toute une séance (tous les étudiants d'un groupe)
+// POST marquer présence pour toute une séance
 router.post('/session', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { groupId, date, presences } = req.body;
-    // presences = [{ enrollmentId, statut }]
     try {
         const results = [];
+        const absents = [];
+
         for (const p of presences) {
             const dateObj = new Date(date);
             dateObj.setHours(0, 0, 0, 0);
@@ -100,8 +150,23 @@ router.post('/session', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res
                 });
                 results.push(created);
             }
+
+            // Collecter les absents pour email
+            if (p.statut === 'ABSENT') {
+                absents.push(p.enrollmentId);
+            }
         }
-        res.json({ message: 'Présences enregistrées', count: results.length });
+
+        // ✅ Envoyer emails absence pour tous les absents
+        for (const enrollmentId of absents) {
+            await notifyAbsence(enrollmentId, date, prisma, req);
+        }
+
+        res.json({
+            message: 'Présences enregistrées',
+            count: results.length,
+            absentsNotified: absents.length,
+        });
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }

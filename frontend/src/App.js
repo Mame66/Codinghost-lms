@@ -15,6 +15,7 @@ import Payments from './pages/Payments';
 import Settings from './pages/Settings';
 import Invoices from "./pages/Invoices";
 import Billing from "./pages/Billing";
+import GroupDetail from "./pages/Groupdetail";
 
 const PrivateRoute = ({ children }) => {
     const { user, loading } = useAuth();
@@ -44,6 +45,11 @@ function AppRoutes() {
             <Route path="/groups" element={
                 <PrivateRoute>
                     <Groups />
+                </PrivateRoute>
+            } />
+            <Route path="/groups/:id" element={
+                <PrivateRoute>
+                    <GroupDetail />
                 </PrivateRoute>
             } />
             <Route path="/course" element={

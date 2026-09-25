@@ -3,6 +3,7 @@ const router = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const { sendWelcomeEmail, sendSafe } = require('../services/emailService');
 
 const prisma = new PrismaClient();
 
@@ -43,6 +44,7 @@ router.get('/', protect, async (req, res) => {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
+
 // GET étudiant connecté
 router.get('/me', protect, async (req, res) => {
     try {
@@ -59,6 +61,7 @@ router.get('/me', protect, async (req, res) => {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
+
 // GET un étudiant par ID
 router.get('/:id', protect, async (req, res) => {
     try {
@@ -118,10 +121,29 @@ router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
             });
         }
 
+        // ✅ Email de bienvenue automatique
+        const emailDest = parentEmail || (email && !email.includes('@codinghost.fr') ? email : null);
+        if (emailDest) {
+            await sendSafe(
+                () => sendWelcomeEmail({
+                    to:          emailDest,
+                    parentName:  parentNom || '',
+                    studentName: `${prenom} ${nom}`,
+                    login:       login,
+                    password:    plainPassword,
+                    groupName:   groupId ? null : null,
+                }),
+                { type:'WELCOME', to:emailDest, subject:`Bienvenue chez CodingHost — ${prenom} ${nom}` },
+                prisma
+            );
+            console.log(`✅ Email de bienvenue envoyé à ${emailDest}`);
+        }
+
         res.status(201).json({
             message: 'Étudiant créé avec succès',
             student,
-            credentials: { login, password: plainPassword }
+            credentials: { login, password: plainPassword },
+            emailSent: !!emailDest,
         });
     } catch (err) {
         console.error(err);
@@ -165,7 +187,6 @@ router.put('/:id/full', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res
 
         // Gérer le groupe
         if (groupId !== undefined) {
-            // Supprimer les présences d'abord
             const existingEnrollments = await prisma.enrollment.findMany({
                 where: { studentId: student.id }
             });
@@ -174,20 +195,33 @@ router.put('/:id/full', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res
                     where: { enrollmentId: enrollment.id }
                 });
             }
-            // Supprimer les enrollments
-            await prisma.enrollment.deleteMany({
-                where: { studentId: student.id }
-            });
-            // Créer le nouvel enrollment
+            await prisma.enrollment.deleteMany({ where: { studentId: student.id } });
             if (groupId) {
                 await prisma.enrollment.create({
-                    data: {
-                        studentId: student.id,
-                        groupId: parseInt(groupId),
-                    }
+                    data: { studentId: student.id, groupId: parseInt(groupId) }
                 });
             }
         }
+
+        // ✅ Email nouveau mot de passe si réinitialisé
+        if (resetPassword && newPassword) {
+            const emailDest = parentEmail || student.parentEmail || student.user?.email;
+            if (emailDest && !emailDest.includes('@codinghost.fr')) {
+                await sendSafe(
+                    () => sendWelcomeEmail({
+                        to:          emailDest,
+                        parentName:  parentNom || student.parentNom || '',
+                        studentName: `${prenom} ${nom}`,
+                        login:       student.user?.login,
+                        password:    newPassword,
+                    }),
+                    { type:'RESET_PASSWORD', to:emailDest, subject:`Nouveaux identifiants — ${prenom} ${nom}` },
+                    prisma
+                );
+                console.log(`✅ Email nouveau mot de passe envoyé à ${emailDest}`);
+            }
+        }
+
         res.json({
             message: 'Étudiant mis à jour',
             newPassword,

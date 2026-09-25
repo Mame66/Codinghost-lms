@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
 const { PrismaClient } = require('@prisma/client');
+const { sendHomeworkCorrectedEmail, sendSafe } = require('../services/emailService');
 
 const prisma = new PrismaClient();
 
@@ -28,7 +29,6 @@ router.get('/', protect, async (req, res) => {
             });
 
         } else if (req.user.role === 'TEACHER') {
-            // Trouver les groupes où cet enseignant est assigné
             const teacherGroups = await prisma.group.findMany({
                 where: { teacherId: req.user.id },
                 include: {
@@ -36,17 +36,10 @@ router.get('/', protect, async (req, res) => {
                 }
             });
 
-            if (teacherGroups.length === 0) {
-                return res.json([]);
-            }
+            if (teacherGroups.length === 0) return res.json([]);
 
-            const studentIds = teacherGroups.flatMap(g =>
-                g.enrollments.map(e => e.studentId)
-            );
-
-            if (studentIds.length === 0) {
-                return res.json([]);
-            }
+            const studentIds = teacherGroups.flatMap(g => g.enrollments.map(e => e.studentId));
+            if (studentIds.length === 0) return res.json([]);
 
             homeworks = await prisma.homework.findMany({
                 where: { studentId: { in: studentIds } },
@@ -90,13 +83,13 @@ router.get('/student/:studentId', protect, async (req, res) => {
     }
 });
 
-// ✅ POST soumettre un devoir — notification SEULEMENT au prof du groupe de l'étudiant
+// ✅ POST soumettre un devoir
 router.post('/', protect, async (req, res) => {
     const { taskId, studentId, contenu, lienRendu, qcmAnswers, qcmSoumis } = req.body;
     try {
         const existing = await prisma.homework.findFirst({
             where: {
-                taskId: parseInt(taskId),
+                taskId:    parseInt(taskId),
                 studentId: parseInt(studentId),
             }
         });
@@ -105,7 +98,7 @@ router.post('/', protect, async (req, res) => {
             return res.status(400).json({ message: 'QCM déjà soumis, impossible de refaire' });
         }
 
-        // Calculer note QCM automatiquement depuis la base de données
+        // Calculer note QCM automatiquement
         let noteQcm = null;
         if (qcmSoumis && qcmAnswers) {
             try {
@@ -113,18 +106,13 @@ router.post('/', protect, async (req, res) => {
                     where: { taskId: parseInt(taskId) },
                     orderBy: { ordre: 'asc' }
                 });
-
-                const answers = typeof qcmAnswers === 'string'
-                    ? JSON.parse(qcmAnswers) : qcmAnswers;
-
+                const answers = typeof qcmAnswers === 'string' ? JSON.parse(qcmAnswers) : qcmAnswers;
                 let correct = 0;
                 questions.forEach((q, i) => {
                     const userAns = parseInt(answers[i]);
                     if (!isNaN(userAns) && userAns === q.correct) correct++;
                 });
-
-                noteQcm = questions.length > 0
-                    ? Math.round((correct / questions.length) * 20) : 0;
+                noteQcm = questions.length > 0 ? Math.round((correct / questions.length) * 20) : 0;
             } catch (e) {
                 console.error('Erreur calcul QCM:', e);
             }
@@ -134,12 +122,12 @@ router.post('/', protect, async (req, res) => {
             const updated = await prisma.homework.update({
                 where: { id: existing.id },
                 data: {
-                    contenu: contenu || existing.contenu,
-                    lienRendu: lienRendu !== undefined ? lienRendu : existing.lienRendu,
+                    contenu:    contenu    || existing.contenu,
+                    lienRendu:  lienRendu  !== undefined ? lienRendu : existing.lienRendu,
                     qcmAnswers: qcmAnswers || existing.qcmAnswers,
-                    qcmSoumis: qcmSoumis || existing.qcmSoumis,
-                    note: noteQcm !== null ? noteQcm : existing.note,
-                    statut: 'RENDU',
+                    qcmSoumis:  qcmSoumis  || existing.qcmSoumis,
+                    note:       noteQcm !== null ? noteQcm : existing.note,
+                    statut:     'RENDU',
                 }
             });
             return res.json({ message: 'Devoir mis à jour', homework: updated });
@@ -147,45 +135,38 @@ router.post('/', protect, async (req, res) => {
 
         const homework = await prisma.homework.create({
             data: {
-                taskId: parseInt(taskId),
-                studentId: parseInt(studentId),
+                taskId:     parseInt(taskId),
+                studentId:  parseInt(studentId),
                 contenu,
                 lienRendu,
                 qcmAnswers,
-                qcmSoumis: qcmSoumis || false,
-                note: noteQcm,
-                statut: 'RENDU',
+                qcmSoumis:  qcmSoumis || false,
+                note:       noteQcm,
+                statut:     'RENDU',
             }
         });
 
-        // ✅ Notification UNIQUEMENT au prof du groupe de l'étudiant
+        // Notification au prof du groupe
         try {
-            // Trouver le groupe de l'étudiant
             const studentEnrollment = await prisma.enrollment.findFirst({
                 where: { studentId: parseInt(studentId) },
-                include: {
-                    group: { include: { teacher: true } }
-                }
+                include: { group: { include: { teacher: true } } }
             });
-
             const student = await prisma.student.findUnique({
                 where: { id: parseInt(studentId) },
                 include: { user: true }
             });
-
             const task = await prisma.task.findUnique({
                 where: { id: parseInt(taskId) },
                 select: { titre: true }
             });
-
-            // Notifier seulement le prof du groupe de l'étudiant
             if (studentEnrollment?.group?.teacher && student && task) {
                 await prisma.notification.create({
                     data: {
-                        userId: studentEnrollment.group.teacher.id,
-                        titre: '📥 Nouveau devoir reçu',
+                        userId:  studentEnrollment.group.teacher.id,
+                        titre:   '📥 Nouveau devoir reçu',
                         message: `${student.user.prenom} ${student.user.nom} a rendu : ${task.titre}`,
-                        type: 'DEVOIR',
+                        type:    'DEVOIR',
                     }
                 });
             }
@@ -200,58 +181,77 @@ router.post('/', protect, async (req, res) => {
     }
 });
 
-// ✅ PUT corriger un devoir — notification à l'étudiant
+// ✅ PUT corriger un devoir — email automatique à l'étudiant/parent
 router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { note, commentaire } = req.body;
     try {
-        // Vérifier que l'enseignant a le droit de corriger ce devoir
+        // Vérifier droits enseignant
         if (req.user.role === 'TEACHER') {
-            const homework = await prisma.homework.findUnique({
+            const hw = await prisma.homework.findUnique({
                 where: { id: parseInt(req.params.id) },
                 include: {
                     student: {
-                        include: {
-                            enrollments: { include: { group: true } }
-                        }
+                        include: { enrollments: { include: { group: true } } }
                     }
                 }
             });
-
-            const studentGroupIds = homework?.student?.enrollments?.map(e => e.groupId) || [];
-            const teacherGroups = await prisma.group.findMany({
-                where: { teacherId: req.user.id },
-                select: { id: true }
-            });
-            const teacherGroupIds = teacherGroups.map(g => g.id);
-
-            const hasAccess = studentGroupIds.some(id => teacherGroupIds.includes(id));
-            if (!hasAccess) {
-                return res.status(403).json({ message: 'Accès refusé — ce devoir n\'appartient pas à votre groupe' });
-            }
+            const studentGroupIds  = hw?.student?.enrollments?.map(e => e.groupId) || [];
+            const teacherGroups    = await prisma.group.findMany({ where: { teacherId: req.user.id }, select: { id: true } });
+            const teacherGroupIds  = teacherGroups.map(g => g.id);
+            const hasAccess        = studentGroupIds.some(id => teacherGroupIds.includes(id));
+            if (!hasAccess) return res.status(403).json({ message: 'Accès refusé' });
         }
 
         const homework = await prisma.homework.update({
             where: { id: parseInt(req.params.id) },
             data: {
-                note: note !== undefined ? parseFloat(note) : null,
+                note:        note !== undefined ? parseFloat(note) : null,
                 commentaire,
-                statut: 'CORRIGE',
+                statut:      'CORRIGE',
             },
             include: {
-                student: { include: { user: true } },
+                student: {
+                    include: {
+                        user: true,
+                        enrollments: { include: { group: { select: { titre: true } } } }
+                    }
+                },
                 task: true,
             }
         });
 
-        // Notification à l'étudiant
+        // Notification dans l'app
         await prisma.notification.create({
             data: {
-                userId: homework.student.userId,
-                titre: '📝 Nouvelle note reçue',
+                userId:  homework.student.userId,
+                titre:   '📝 Nouvelle note reçue',
                 message: `Vous avez reçu ${note}/20 pour : ${homework.task.titre}`,
-                type: 'NOTE',
+                type:    'NOTE',
             }
         });
+
+        // ✅ Email à l'étudiant ou au parent
+        const emailDest = homework.student?.parentEmail || homework.student?.user?.email;
+        if (emailDest && !emailDest.includes('@codinghost.fr')) {
+            const studentName = `${homework.student?.user?.prenom} ${homework.student?.user?.nom}`;
+            const groupName   = homework.student?.enrollments?.[0]?.group?.titre || '';
+            const teacherName = `${req.user.prenom} ${req.user.nom}`;
+
+            await sendSafe(
+                () => sendHomeworkCorrectedEmail({
+                    to:          emailDest,
+                    studentName,
+                    taskTitle:   homework.task?.titre,
+                    note:        parseFloat(note),
+                    maxNote:     20,
+                    comment:     commentaire || '',
+                    teacherName,
+                }),
+                { type:'HOMEWORK_CORRECTED', to:emailDest, subject:`Devoir corrigé — ${homework.task?.titre} — ${note}/20` },
+                prisma
+            );
+            console.log(`✅ Email correction envoyé à ${emailDest} — Note: ${note}/20`);
+        }
 
         res.json(homework);
     } catch (err) {
