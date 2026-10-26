@@ -3,6 +3,8 @@ import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Ic, ActionBtn, IconBadge } from '../components/Icons';
+import Avatar from '../components/Avatar';
+import { AUDIENCES, AudienceBadge } from '../utils/audience';
 
 // ════════════════════════════════════════════════════════════
 // TOAST SYSTEM — remplace tous les alert() natifs
@@ -80,7 +82,7 @@ function useToast() {
 // FORMULAIRE — un seul objet form (fix bug ville)
 // ════════════════════════════════════════════════════════════
 const EMPTY_FORM = {
-    titre: '', lieu: '', ville: 'Thionville',
+    titre: '', lieu: '', ville: 'Thionville', audience: 'ENFANT',
     teacherId: '', supervisorId: '',
     statut: 'INSCRIPTION', format: 'OFFLINE', type: 'GROUPE',
 };
@@ -89,6 +91,25 @@ const FormFields = ({ form, setForm, teachers }) => {
     const set = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }));
     return (
         <div style={s.formGrid}>
+            <div style={{ ...s.fg, gridColumn: '1/-1' }}>
+                <label style={s.fl}>Public *</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    {Object.values(AUDIENCES).map(a => (
+                        <button key={a.key} type="button"
+                                onClick={() => setForm(prev => ({ ...prev, audience: a.key }))}
+                                style={{
+                                    flex: 1, padding: '10px', borderRadius: '10px', cursor: 'pointer', fontFamily: 'inherit',
+                                    fontWeight: 800, fontSize: '13px', textAlign: 'left',
+                                    border: `2px solid ${form.audience === a.key ? a.color : '#E5E0F5'}`,
+                                    background: form.audience === a.key ? a.bg : '#fff',
+                                    color: form.audience === a.key ? a.color : '#6B7280',
+                                }}>
+                            {a.icon} {a.label}
+                            <div style={{ fontSize: '11px', fontWeight: 500, marginTop: '2px', color: '#9CA3AF' }}>{a.examples}</div>
+                        </button>
+                    ))}
+                </div>
+            </div>
             <div style={{ ...s.fg, gridColumn: '1/-1' }}>
                 <label style={s.fl}>Titre *</label>
                 <input style={s.fi} placeholder="ex: 2025 Python Samedi 10H"
@@ -165,6 +186,7 @@ export default function Groups() {
     const [filterStatus, setFilterStatus]   = useState('');
     const [filterTeacher, setFilterTeacher] = useState('');
     const [filterFormat, setFilterFormat]   = useState('');
+    const [filterAudience, setFilterAudience] = useState('');
 
     const [showAdd, setShowAdd]               = useState(false);
     const [showEdit, setShowEdit]             = useState(false);
@@ -175,7 +197,7 @@ export default function Groups() {
     const [form, setForm] = useState({ ...EMPTY_FORM });
     const canAdd = ['ADMIN', 'TEACHER'].includes(user?.role);
 
-    useEffect(() => { fetchGroups(); fetchTeachers(); }, []);
+    useEffect(() => { fetchGroups(); fetchTeachers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchGroups = async () => {
         try { const r = await api.get('/groups'); setGroups(r.data); }
@@ -192,6 +214,7 @@ export default function Groups() {
         titre:        g.titre                      || '',
         lieu:         g.lieu                       || '',
         ville:        g.ville                      || 'Thionville',
+        audience:     g.audience                   || 'ENFANT',
         teacherId:    g.teacher?.id?.toString()    || '',
         supervisorId: g.supervisor?.id?.toString() || '',
         statut:       g.statut                     || 'INSCRIPTION',
@@ -203,6 +226,7 @@ export default function Groups() {
         titre:        form.titre,
         lieu:         form.lieu         || null,
         ville:        form.ville,
+        audience:     form.audience,
         teacherId:    form.teacherId    || null,
         supervisorId: form.supervisorId || null,
         statut:       form.statut,
@@ -288,7 +312,8 @@ export default function Groups() {
         return ms &&
             (!filterStatus  || g.statut    === filterStatus) &&
             (!filterTeacher || g.teacherId === parseInt(filterTeacher)) &&
-            (!filterFormat  || g.format    === filterFormat);
+            (!filterFormat  || g.format    === filterFormat) &&
+            (!filterAudience || g.audience === filterAudience);
     });
 
     return (
@@ -316,6 +341,22 @@ export default function Groups() {
                         <Ic name="add" size={14} color="#fff" /> Ajouter
                     </button>
                 )}
+            </div>
+
+            {/* ── Public ── */}
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                {[{ key: '', label: 'Tous les groupes', color: '#1A1040' }, ...Object.values(AUDIENCES).map(a => ({ key: a.key, label: `${a.icon} ${a.label}`, color: a.color, bg: a.bg }))].map(t => {
+                    const n = t.key ? groups.filter(g => g.audience === t.key).length : groups.length;
+                    const on = filterAudience === t.key;
+                    return (
+                        <button key={t.key || 'all'} onClick={() => setFilterAudience(t.key)} style={{
+                            padding: '7px 14px', borderRadius: '50px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                            border: `1.5px solid ${on ? t.color : '#E5E0F5'}`, background: on ? (t.bg || '#F3F4F6') : '#fff', color: on ? t.color : '#6B7280',
+                        }}>
+                            {t.label} <span style={{ opacity: 0.6 }}>({n})</span>
+                        </button>
+                    );
+                })}
             </div>
 
             {/* ── Filtres ── */}
@@ -350,13 +391,13 @@ export default function Groups() {
                 <div style={{ overflowX:'auto' }}>
                     <table style={s.table}>
                         <thead>
-                        <tr>{['ID','Titre','Enseignant','Étudiants','Ville','Lieu','Type','Statut','Format','Actions'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+                        <tr>{['ID','Titre','Public','Enseignant','Étudiants','Ville','Lieu','Type','Statut','Format','Actions'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
                         </thead>
                         <tbody>
                         {loading ? (
-                            <tr><td colSpan="10" style={s.tdCenter}>Chargement...</td></tr>
+                            <tr><td colSpan="11" style={s.tdCenter}>Chargement...</td></tr>
                         ) : filtered.length === 0 ? (
-                            <tr><td colSpan="10" style={s.tdCenter}>Aucun groupe trouvé</td></tr>
+                            <tr><td colSpan="11" style={s.tdCenter}>Aucun groupe trouvé</td></tr>
                         ) : filtered.map(g => {
                             const sc = statusConfig[g.statut] || statusConfig.INSCRIPTION;
                             const fc = formatConfig[g.format] || formatConfig.OFFLINE;
@@ -364,10 +405,11 @@ export default function Groups() {
                                 <tr key={g.id} style={s.tr}>
                                     <td style={s.tdMuted}>{g.id}</td>
                                     <td style={s.tdLink} onClick={() => navigate(`/groups/${g.id}`)}>{g.titre}</td>
+                                    <td style={s.td}><AudienceBadge audience={g.audience} size="sm" /></td>
                                     <td style={s.td}>
                                         {g.teacher ? (
                                             <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                                                <div style={s.teacherAvatar}>{g.teacher.prenom?.[0]}{g.teacher.nom?.[0]}</div>
+                                                <Avatar user={g.teacher} size={28} />
                                                 <span style={{ fontSize:'13px' }}>{g.teacher.prenom} {g.teacher.nom}</span>
                                             </div>
                                         ) : <span style={s.noTeacher}>Non assigné</span>}
@@ -412,7 +454,7 @@ export default function Groups() {
                                     <td style={s.td}>
                                         <div style={{ display:'flex', gap:'6px' }}>
                                             {canAdd && <ActionBtn icon="edit" color="#5B2EE8" bg="#EDE8FF" onClick={() => openEdit(g)} title="Modifier" />}
-                                            <ActionBtn icon="users" color="#008060" bg="#ECFDF5" onClick={() => openStudents(g)} title="Voir les étudiants" />
+                                            <ActionBtn icon="arrow_right" color="#008060" bg="#ECFDF5" onClick={() => navigate(`/groups/${g.id}`)} title="Ouvrir le groupe" />
                                             {user?.role === 'ADMIN' && <ActionBtn icon="trash" color="#CC0033" bg="#FFF0F0" borderColor="#FFD0D0" onClick={() => handleDelete(g.id, g.titre)} title="Supprimer" />}
                                         </div>
                                     </td>
@@ -504,9 +546,7 @@ export default function Groups() {
                                         <td style={s.tdMuted}>{i + 1}</td>
                                         <td style={s.td}>
                                             <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                                                <div style={{ width:'30px', height:'30px', borderRadius:'50%', background:'linear-gradient(135deg,#5B2EE8,#A78BFF)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'800', flexShrink:0 }}>
-                                                    {e.student?.user?.prenom?.[0]}{e.student?.user?.nom?.[0]}
-                                                </div>
+                                                <Avatar user={e.student?.user} size={30} />
                                                 <span style={{ fontWeight:'700', fontSize:'13px' }}>{e.student?.user?.prenom} {e.student?.user?.nom}</span>
                                             </div>
                                         </td>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import Avatar from '../components/Avatar';
 
 // ── Icônes SVG ────────────────────────────────────────────
 const Ic = ({ name, size = 18, color = 'currentColor' }) => {
@@ -34,7 +35,6 @@ export default function Dashboard() {
     const { user }   = useAuth();
     const navigate   = useNavigate();
     const isAdmin    = user?.role === 'ADMIN';
-    const isTeacher  = user?.role === 'TEACHER';
 
     const [stats, setStats]               = useState(null);
     const [billingStats, setBillingStats] = useState(null);
@@ -55,7 +55,7 @@ export default function Dashboard() {
             setLoading(false);
         };
         fetchStats();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     if (loading) return (
         <div style={{ textAlign: 'center', padding: '60px', color: '#6B7280' }}>Chargement...</div>
@@ -66,15 +66,16 @@ export default function Dashboard() {
 
     // ✅ Cartes : TEACHER ne voit pas Total facturé et Total reçu
     const allCards = [
-        { icon: 'students',  label: 'Étudiants',    value: stats?.totalStudents    || 0,  color: '#5B2EE8', bg: '#EDE8FF', path: '/students',   roles: ['ADMIN','TEACHER'] },
-        { icon: 'groups',    label: 'Groupes',       value: stats?.totalGroups      || 0,  color: '#0069C0', bg: '#EFF6FF', path: '/groups',     roles: ['ADMIN','TEACHER'] },
-        { icon: 'teacher',   label: 'Enseignants',   value: stats?.totalTeachers    || 0,  color: '#008060', bg: '#ECFDF5', path: null,          roles: ['ADMIN'] },
-        { icon: 'courses',   label: 'Cours',         value: stats?.totalCourses     || 0,  color: '#8B6200', bg: '#FFFBEB', path: '/my-courses', roles: ['ADMIN','TEACHER'] },
-        { icon: 'inbox',     label: 'Devoirs reçus', value: stats?.totalHomeworks   || 0,  color: '#5B2EE8', bg: '#EDE8FF', path: '/homeworks',  roles: ['ADMIN','TEACHER'] },
-        { icon: 'pending',   label: 'À corriger',    value: stats?.pendingHomeworks || 0,  color: '#CC3300', bg: '#FFF0EB', path: '/homeworks',  roles: ['ADMIN','TEACHER'], urgent: stats?.pendingHomeworks > 0 },
+        { icon: 'students',  label: 'Élèves enfants', value: stats?.studentsEnfants || 0,  color: '#EA580C', bg: '#FFF4EC', path: '/students/enfants', roles: ['ADMIN','TEACHER','TEACHER_VIEW'] },
+        { icon: 'students',  label: 'Élèves adultes', value: stats?.studentsAdultes || 0,  color: '#1D4ED8', bg: '#EFF4FF', path: '/students/adultes', roles: ['ADMIN','TEACHER','TEACHER_VIEW'] },
+        { icon: 'groups',    label: 'Groupes',       value: stats?.totalGroups      || 0,  color: '#0069C0', bg: '#EFF6FF', path: '/groups',     roles: ['ADMIN','TEACHER','TEACHER_VIEW'] },
+        { icon: 'teacher',   label: 'Enseignants',   value: stats?.totalTeachers    || 0,  color: '#008060', bg: '#ECFDF5', path: '/teachers',   roles: ['ADMIN'] },
+        { icon: 'courses',   label: 'Cours',         value: stats?.totalCourses     || 0,  color: '#8B6200', bg: '#FFFBEB', path: '/courses/enfants', roles: ['ADMIN','TEACHER','TEACHER_VIEW'] },
+        { icon: 'inbox',     label: 'Devoirs reçus', value: stats?.totalHomeworks   || 0,  color: '#5B2EE8', bg: '#EDE8FF', path: '/homeworks',  roles: ['ADMIN','TEACHER','TEACHER_VIEW'] },
+        { icon: 'pending',   label: 'À corriger',    value: stats?.pendingHomeworks || 0,  color: '#CC3300', bg: '#FFF0EB', path: '/homeworks',  roles: ['ADMIN','TEACHER','TEACHER_VIEW'], urgent: stats?.pendingHomeworks > 0 },
         // ✅ Ces deux cartes : ADMIN seulement
-        { icon: 'money',     label: 'Total facturé', value: `${(stats?.totalRevenue || 0).toLocaleString()} DA`, color: '#008060', bg: '#ECFDF5', path: '/payments', roles: ['ADMIN'] },
-        { icon: 'payments',  label: 'Total reçu',    value: `${(stats?.paidRevenue  || 0).toLocaleString()} DA`, color: '#0069C0', bg: '#EFF6FF', path: '/payments', roles: ['ADMIN'], trend: `${tauxPaiement}%` },
+        { icon: 'money',     label: 'Total facturé', value: `${(stats?.totalRevenue || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, color: '#008060', bg: '#ECFDF5', path: '/payments', roles: ['ADMIN'] },
+        { icon: 'payments',  label: 'Total reçu',    value: `${(stats?.paidRevenue  || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, color: '#0069C0', bg: '#EFF6FF', path: '/payments', roles: ['ADMIN'], trend: `${tauxPaiement}%` },
     ];
 
     const cards = allCards.filter(c => c.roles.includes(user?.role));
@@ -89,9 +90,10 @@ export default function Dashboard() {
 
     // ✅ Actions rapides : TEACHER ne voit pas paiements et facturation
     const allQuickActions = [
-        { icon: 'add',        label: 'Ajouter étudiant',  path: '/students',  roles: ['ADMIN','TEACHER'] },
+        { icon: 'add',        label: 'Élève enfant',       path: '/students/enfants', roles: ['ADMIN','TEACHER'] },
+        { icon: 'add',        label: 'Élève adulte',       path: '/students/adultes', roles: ['ADMIN','TEACHER'] },
         { icon: 'groups',     label: 'Nouveau groupe',     path: '/groups',    roles: ['ADMIN','TEACHER'] },
-        { icon: 'courses',    label: 'Nouveau cours',      path: '/my-courses',roles: ['ADMIN','TEACHER'] },
+        { icon: 'teacher',    label: 'Enseignants',        path: '/teachers',  roles: ['ADMIN'] },
         { icon: 'attendance', label: 'Marquer présences',  path: '/attendance',roles: ['ADMIN','TEACHER'] },
         { icon: 'payments',   label: 'Gérer paiements',    path: '/payments',  roles: ['ADMIN'] },
         { icon: 'homeworks',  label: 'Corriger devoirs',   path: '/homeworks', roles: ['ADMIN','TEACHER'] },
@@ -219,7 +221,7 @@ export default function Dashboard() {
                                 <Ic name="students" size={16} color="#5B2EE8" />
                                 <span style={s.bt}>Derniers inscrits</span>
                             </div>
-                            <button style={s.linkBtn} onClick={() => navigate('/students')}>
+                            <button style={s.linkBtn} onClick={() => navigate('/students/enfants')}>
                                 Voir tout <Ic name="arrow" size={12} color="#5B2EE8" />
                             </button>
                         </div>
@@ -228,7 +230,7 @@ export default function Dashboard() {
                         ) : (
                             stats.recentStudents.map(st => (
                                 <div key={st.id} style={s.actItem}>
-                                    <div style={s.miniAvatar}>{st.user?.prenom?.[0]}{st.user?.nom?.[0]}</div>
+                                    <Avatar user={st.user} size={32} />
                                     <div style={{ flex: 1 }}>
                                         <div style={s.actTitle}>{st.user?.prenom} {st.user?.nom}</div>
                                         <div style={s.actSub}>{st.enrollments?.[0]?.group?.titre || 'Sans groupe'}</div>

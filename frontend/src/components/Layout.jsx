@@ -2,10 +2,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import Notifications from "../pages/Notifications";
+import Avatar from './Avatar';
+import { AUDIENCES, loginPathFor, lastSpace } from '../utils/audience';
 
 // ════════════════════════════════════════════════════════════
 // LOGO CODINGHOST — SVG inline exact
 // ════════════════════════════════════════════════════════════
+// eslint-disable-next-line no-unused-vars
 const CodingHostLogo = ({ collapsed = false }) => (
     <svg viewBox="0 0 1400 360" xmlns="http://www.w3.org/2000/svg"
          style={{ width: collapsed ? '36px' : '140px', height: collapsed ? '36px' : 'auto', transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)', overflow: 'visible' }}>
@@ -102,6 +105,25 @@ const Icon = ({ name, size = 20, color = 'currentColor' }) => {
         chevron_right: <svg {...p}>
             <polyline points="9 18 15 12 9 6"/>
         </svg>,
+        teachers: <svg {...p}>
+            <circle cx="12" cy="7" r="3.5"/>
+            <path d="M5 21v-1.5A5.5 5.5 0 0 1 10.5 14h3a5.5 5.5 0 0 1 5.5 5.5V21"/>
+            <path d="M17 3.5l3 1.5-3 1.5"/>
+        </svg>,
+        kids: <svg {...p}>
+            <rect x="3" y="7" width="18" height="11" rx="5"/>
+            <line x1="7.5" y1="11" x2="7.5" y2="14"/><line x1="6" y1="12.5" x2="9" y2="12.5"/>
+            <circle cx="15.5" cy="11.5" r="1" fill={color}/><circle cx="17.5" cy="13.5" r="1" fill={color}/>
+        </svg>,
+        adults: <svg {...p}>
+            <rect x="3" y="7" width="18" height="13" rx="2"/>
+            <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <line x1="3" y1="13" x2="21" y2="13"/>
+        </svg>,
+        mail: <svg {...p}>
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <polyline points="22 6 12 13 2 6"/>
+        </svg>,
         euro: <svg {...p}>
             <path d="M4 10h12M4 14h12"/>
             <path d="M19.5 9.5c-1-1.7-2.9-2.8-5-2.8a6 6 0 0 0 0 12c2.1 0 4-1.1 5-2.8"/>
@@ -113,32 +135,43 @@ const Icon = ({ name, size = 20, color = 'currentColor' }) => {
 // ════════════════════════════════════════════════════════════
 // NAVIGATION PAR RÔLE
 // ════════════════════════════════════════════════════════════
-const NAV = {
-    ADMIN: [
-        { icon: 'dashboard',  label: 'Tableau de bord',   path: '/dashboard',  color: '#6C4CF5' },
-        { icon: 'groups',     label: 'Groupes',            path: '/groups',     color: '#0891B2' },
-        { icon: 'courses',    label: 'Mes cours',          path: '/my-courses', color: '#7C3AED' },
-        { icon: 'students',   label: 'Étudiants',          path: '/students',   color: '#059669' },
+const STAFF_NAV = (role) => {
+    const isAdmin = role === 'ADMIN';
+    return [
+        { icon: 'dashboard',  label: 'Tableau de bord',   path: '/dashboard',         color: '#6C4CF5' },
+        { icon: 'groups',     label: isAdmin ? 'Groupes' : 'Mes groupes', path: '/groups', color: '#0891B2' },
+        { section: 'Espace Enfants' },
+        { icon: 'kids',       label: 'Cours enfants',     path: '/courses/enfants',   color: '#EA580C' },
+        { icon: 'students',   label: 'Élèves enfants',    path: '/students/enfants',  color: '#F59E0B' },
+        { section: 'Espace Adultes' },
+        { icon: 'adults',     label: 'Cours adultes',     path: '/courses/adultes',   color: '#2563EB' },
+        { icon: 'students',   label: 'Élèves adultes',    path: '/students/adultes',  color: '#3B82F6' },
+        { section: 'Suivi' },
+        ...(isAdmin ? [{ icon: 'teachers', label: 'Enseignants', path: '/teachers', color: '#059669' }] : []),
         { icon: 'attendance', label: 'Présences',          path: '/attendance', color: '#D97706' },
-        { icon: 'payments',   label: 'Paiements',          path: '/payments',   color: '#DC2626' },
-        { icon: 'billing',    label: 'Facturation',        path: '/billing',    color: '#0284C7' },
-        { icon: 'homeworks',  label: 'Devoirs',            path: '/homeworks',  color: '#9333EA' },
+        { icon: 'homeworks',  label: isAdmin ? 'Devoirs' : 'Correction devoirs', path: '/homeworks', color: '#9333EA' },
+        ...(role !== 'TEACHER_VIEW' ? [{ icon: 'mail', label: 'Emails', path: '/emails', color: '#DB2777' }] : []),
+        ...(isAdmin ? [
+            { section: 'Gestion' },
+            { icon: 'payments', label: 'Paiements',   path: '/payments', color: '#DC2626' },
+            { icon: 'billing',  label: 'Facturation', path: '/billing',  color: '#0284C7' },
+        ] : []),
         { icon: 'settings',   label: 'Paramètres',         path: '/settings',   color: '#64748B' },
-    ],
-    TEACHER: [
-        { icon: 'dashboard',  label: 'Tableau de bord',   path: '/dashboard',  color: '#6C4CF5' },
-        { icon: 'groups',     label: 'Mes groupes',        path: '/groups',     color: '#0891B2' },
-        { icon: 'courses',    label: 'Mes cours',          path: '/my-courses', color: '#7C3AED' },
-        { icon: 'students',   label: 'Mes étudiants',      path: '/students',   color: '#059669' },
-        { icon: 'attendance', label: 'Présences',          path: '/attendance', color: '#D97706' },
-        { icon: 'homeworks',  label: 'Correction devoirs', path: '/homeworks',  color: '#9333EA' },
-    ],
+    ];
+};
+
+const NAV = {
+    ADMIN:        STAFF_NAV('ADMIN'),
+    TEACHER:      STAFF_NAV('TEACHER'),
+    TEACHER_VIEW: STAFF_NAV('TEACHER_VIEW'),
     STUDENT: [
-        { icon: 'course',     label: 'Mon cours',          path: '/course',     color: '#6C4CF5' },
-        { icon: 'homeworks',  label: 'Mes devoirs',        path: '/homeworks',  color: '#9333EA' },
+        { icon: 'course',     label: 'Mes cours',          path: '/course',     color: '#6C4CF5' },
         { icon: 'grade',      label: 'Mes notes',          path: '/my-grades',  color: '#D97706' },
+        { icon: 'settings',   label: 'Mon profil',         path: '/settings',   color: '#64748B' },
     ],
 };
+
+const ROLE_LABEL = { ADMIN: 'Administrateur', TEACHER: 'Enseignant', TEACHER_VIEW: 'Enseignant', STUDENT: 'Élève' };
 
 // ════════════════════════════════════════════════════════════
 // SIDEBAR ITEM avec animation et tooltip
@@ -243,7 +276,9 @@ export default function Layout({ children }) {
     const sidebarRef = useRef(null);
 
     const navItems = NAV[user?.role] || [];
-    const initials = `${user?.prenom?.[0] || ''}${user?.nom?.[0] || ''}`.toUpperCase();
+    const links = navItems.filter(i => !i.section);
+    const studentSpace = user?.role === 'STUDENT' ? AUDIENCES[user?.audience] : null;
+    const roleLabel = studentSpace ? `Élève · ${studentSpace.label}` : (ROLE_LABEL[user?.role] || '');
 
     // Fermer la sidebar étendue si clic dehors
     useEffect(() => {
@@ -256,7 +291,11 @@ export default function Layout({ children }) {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [expanded]);
 
-    const handleLogout = () => { logout(); navigate('/login'); };
+    const handleLogout = () => {
+        const target = loginPathFor(user?.role === 'STUDENT' ? (user?.audience || lastSpace()) : 'EQUIPE');
+        logout();
+        navigate(target);
+    };
     const goHome = () => navigate(user?.role === 'STUDENT' ? '/course' : '/dashboard');
 
     const sideWidth = expanded ? '220px' : '68px';
@@ -420,9 +459,19 @@ export default function Layout({ children }) {
                         </div>
                     )}
 
-                    {navItems.map((item) => {
+                    {navItems.map((item, idx) => {
+                        if (item.section) {
+                            return expanded ? (
+                                <div key={`s-${idx}`} style={{ fontSize: '9px', fontWeight: '700', color: 'rgba(255,255,255,0.22)', textTransform: 'uppercase', letterSpacing: '1.2px', padding: '12px 8px 4px' }}>
+                                    {item.section}
+                                </div>
+                            ) : (
+                                <div key={`s-${idx}`} style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '8px 10px' }} />
+                            );
+                        }
                         const isActive = location.pathname === item.path ||
-                            (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+                            (item.path !== '/dashboard' && location.pathname.startsWith(item.path + '/')) ||
+                            (item.path === '/groups' && location.pathname.startsWith('/groups'));
                         return (
                             <SideItem
                                 key={item.path}
@@ -450,19 +499,13 @@ export default function Layout({ children }) {
                             border: '1px solid rgba(255,255,255,0.07)',
                             marginBottom: '4px',
                         }}>
-                            <div style={{
-                                width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0,
-                                background: 'linear-gradient(135deg, #6C4CF5, #F4A340)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '12px', fontWeight: '800', color: '#fff',
-                                boxShadow: '0 2px 8px rgba(108,76,245,0.4)',
-                            }}>{initials}</div>
+                            <Avatar user={user} size={34} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: '12px', fontWeight: '700', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {user?.prenom} {user?.nom}
                                 </div>
                                 <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginTop: '1px' }}>
-                                    {user?.role === 'ADMIN' ? 'Administrateur' : user?.role === 'TEACHER' ? 'Enseignant' : 'Étudiant'}
+                                    {roleLabel}
                                 </div>
                             </div>
                         </div>
@@ -471,14 +514,7 @@ export default function Layout({ children }) {
                     {/* Avatar seul si collapsed */}
                     {!expanded && (
                         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '4px' }}>
-                            <div style={{
-                                width: '38px', height: '38px', borderRadius: '50%',
-                                background: 'linear-gradient(135deg, #6C4CF5, #F4A340)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '12px', fontWeight: '800', color: '#fff',
-                                boxShadow: '0 2px 10px rgba(108,76,245,0.4)',
-                                cursor: 'default',
-                            }}>{initials}</div>
+                            <Avatar user={user} size={38} />
                         </div>
                     )}
 
@@ -506,9 +542,18 @@ export default function Layout({ children }) {
                     boxShadow: '0 1px 8px rgba(0,0,0,0.04)',
                 }}>
                     {/* Fil d'ariane */}
-                    <BreadCrumb location={location} navItems={navItems} />
+                    <BreadCrumb location={location} navItems={links} />
 
                     <div style={{ flex: 1 }} />
+
+                    {studentSpace && (
+                        <span style={{
+                            fontSize: '12px', fontWeight: 800, padding: '5px 12px', borderRadius: '50px',
+                            background: studentSpace.bg, color: studentSpace.color, border: `1px solid ${studentSpace.border}`,
+                        }}>
+                            {studentSpace.icon} Espace {studentSpace.label}
+                        </span>
+                    )}
 
                     {/* Notifications */}
                     <Notifications />
@@ -523,17 +568,11 @@ export default function Layout({ children }) {
                         border: '1px solid #EBEBF0', cursor: 'pointer',
                         background: '#FAFAFA', transition: 'all 0.15s',
                     }} onClick={() => navigate('/settings')}>
-                        <div style={{
-                            width: '30px', height: '30px', borderRadius: '50%',
-                            background: 'linear-gradient(135deg, #6C4CF5, #9B4DE1)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '11px', fontWeight: '800', color: '#fff',
-                            flexShrink: 0,
-                        }}>{initials}</div>
+                        <Avatar user={user} size={30} />
                         <div style={{ lineHeight: 1.2 }}>
                             <div style={{ fontSize: '13px', fontWeight: '600', color: '#1A1040' }}>{user?.prenom} {user?.nom}</div>
                             <div style={{ fontSize: '10px', color: '#9CA3AF' }}>
-                                {user?.role === 'ADMIN' ? 'Admin' : user?.role === 'TEACHER' ? 'Enseignant' : 'Étudiant'}
+                                {roleLabel}
                             </div>
                         </div>
                     </div>
@@ -585,7 +624,7 @@ function LogoutBtn({ expanded, onClick }) {
 function BreadCrumb({ location, navItems }) {
     const current = navItems.find(i =>
         location.pathname === i.path ||
-        (i.path !== '/dashboard' && location.pathname.startsWith(i.path))
+        (i.path !== '/dashboard' && location.pathname.startsWith(i.path + '/'))
     );
     if (!current) return <span style={{ fontSize: '14px', fontWeight: '600', color: '#1A1040' }}>CodingHost</span>;
     return (
@@ -600,4 +639,4 @@ function BreadCrumb({ location, navItems }) {
             <span style={{ fontSize: '14px', fontWeight: '700', color: '#1A1040' }}>{current.label}</span>
         </div>
     );
-}
+}

@@ -1,18 +1,26 @@
 const express = require('express');
 const router  = express.Router();
-const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { protect, allowRoles, adminOnly } = require('../middleware/authMiddleware');
+const prisma = require('../lib/prisma');
 
-// GET tous les groupes
-router.get('/', protect, async (req, res) => {
+const staff   = allowRoles('ADMIN', 'TEACHER', 'TEACHER_VIEW');
+const canEdit = allowRoles('ADMIN', 'TEACHER');
+const AUDIENCES = ['ENFANT', 'ADULTE'];
+
+const personSelect = { id: true, nom: true, prenom: true, avatarUrl: true };
+
+// GET /groups?audience=ENFANT|ADULTE
+router.get('/', protect, staff, async (req, res) => {
     try {
+        const { audience } = req.query;
         const groups = await prisma.group.findMany({
+            where: AUDIENCES.includes(audience) ? { audience } : {},
             include: {
-                teacher:    { select: { id: true, nom: true, prenom: true } },
-                supervisor: { select: { id: true, nom: true, prenom: true } },
+                teacher:    { select: personSelect },
+                supervisor: { select: personSelect },
                 _count:     { select: { enrollments: true } },
-            }
+            },
+            orderBy: { createdAt: 'desc' },
         });
         res.json(groups);
     } catch (err) {
@@ -20,23 +28,26 @@ router.get('/', protect, async (req, res) => {
     }
 });
 
-// GET un groupe par ID
-router.get('/:id', protect, async (req, res) => {
+// GET /groups/:id
+router.get('/:id', protect, staff, async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: 'Identifiant invalide' });
     try {
         const group = await prisma.group.findUnique({
-            where: { id: parseInt(req.params.id) },
+            where: { id },
             include: {
-                teacher:    { select: { id: true, nom: true, prenom: true } },
-                supervisor: { select: { id: true, nom: true, prenom: true } },
+                teacher:    { select: personSelect },
+                supervisor: { select: personSelect },
                 _count:     { select: { enrollments: true } },
                 enrollments: {
+                    orderBy: { createdAt: 'asc' },
                     include: {
                         student: {
                             include: {
                                 user: {
                                     select: {
-                                        id: true, nom: true, prenom: true,
-                                        login: true, plainPassword: true,
+                                        id: true, nom: true, prenom: true, login: true,
+                                        plainPassword: true, avatarUrl: true, email: true, telephone: true,
                                     }
                                 }
                             }
@@ -47,27 +58,41 @@ router.get('/:id', protect, async (req, res) => {
             }
         });
         if (!group) return res.status(404).json({ message: 'Groupe non trouvé' });
+        if (req.user.role === 'TEACHER_VIEW') {
+            group.enrollments.forEach(e => { if (e.student?.user) e.student.user.plainPassword = null; });
+        }
         res.json(group);
     } catch (err) {
+        console.error('GET /groups/:id error:', err);
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
 
-// GET cours d'un groupe
-router.get('/:id/courses', protect, async (req, res) => {
+// GET /groups/:id/courses → cours du groupe avec modules et leçons
+router.get('/:id/courses', protect, staff, async (req, res) => {
     try {
         const courseGroups = await prisma.courseGroup.findMany({
             where: { groupId: parseInt(req.params.id) },
             include: {
                 course: {
                     include: {
-                        chapters: {
+                        modules: {
                             orderBy: { ordre: 'asc' },
-                            include: { tasks: { orderBy: { ordre: 'asc' } } }
-                        }
-                    }
-                }
-            }
+                            include: {
+                                chapters: {
+                                    orderBy: { ordre: 'asc' },
+                                    select: {
+                                        id: true, titre: true, ordre: true, locked: true,
+                                        objectives: true, studentSlidesUrl: true, imageUrl: true, challengeContent: true,
+                                        homeworkEnabled: true,
+                                        _count: { select: { quizQuestions: true, resources: true, submissions: true } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         });
         res.json(courseGroups.map(cg => cg.course));
     } catch (err) {
@@ -75,110 +100,67 @@ router.get('/:id/courses', protect, async (req, res) => {
     }
 });
 
-// POST créer un groupe
-router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    // ✅ FIX : lire ville EXPLICITEMENT depuis req.body
-    const ville        = req.body.ville;
-    const titre        = req.body.titre;
-    const teacherId    = req.body.teacherId;
-    const supervisorId = req.body.supervisorId;
-    const lieu         = req.body.lieu;
-    const statut       = req.body.statut;
-    const format       = req.body.format;
-    const type         = req.body.type;
+const buildData = (body) => {
+    const ville = typeof body.ville === 'string' && body.ville.trim() ? body.ville.trim() : 'Thionville';
+    return {
+        titre:        String(body.titre).trim(),
+        teacherId:    body.teacherId    ? parseInt(body.teacherId)    : null,
+        supervisorId: body.supervisorId ? parseInt(body.supervisorId) : null,
+        lieu:         body.lieu || null,
+        ville,
+        audience:     AUDIENCES.includes(body.audience) ? body.audience : 'ENFANT',
+        statut:       body.statut || 'INSCRIPTION',
+        format:       body.format || 'OFFLINE',
+        type:         body.type   || 'GROUPE',
+    };
+};
 
-    // Log pour confirmer ce que le backend reçoit
-    console.log('📦 POST /groups — body reçu:', {
-        titre, ville, lieu, statut, format, type, teacherId, supervisorId
-    });
-
-    if (!titre) return res.status(400).json({ message: 'Titre obligatoire' });
-
-    // ✅ FIX : ne pas utiliser || 'Thionville' si ville est déjà une string valide
-    const villeValue = (ville && ville.trim() !== '') ? ville.trim() : 'Thionville';
-
-    console.log('📍 Ville qui sera enregistrée:', villeValue);
-
+// POST /groups
+router.post('/', protect, canEdit, async (req, res) => {
+    if (!req.body.titre || !String(req.body.titre).trim()) return res.status(400).json({ message: 'Titre obligatoire' });
     try {
-        const group = await prisma.group.create({
-            data: {
-                titre,
-                teacherId:    teacherId    ? parseInt(teacherId)    : null,
-                supervisorId: supervisorId ? parseInt(supervisorId) : null,
-                lieu:         lieu         || null,
-                ville:        villeValue,                // ✅ toujours correct
-                statut:       statut        || 'INSCRIPTION',
-                format:       format        || 'OFFLINE',
-                type:         type          || 'GROUPE',
-            }
-        });
-        console.log('✅ Groupe créé en BDD:', { id: group.id, titre: group.titre, ville: group.ville });
+        const group = await prisma.group.create({ data: buildData(req.body) });
         res.status(201).json(group);
     } catch (err) {
-        console.error('❌ Erreur création groupe:', err.message);
+        console.error('Erreur création groupe:', err.message);
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
 
-// PUT modifier un groupe
-router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    // ✅ FIX : même approche — lecture explicite
-    const ville        = req.body.ville;
-    const titre        = req.body.titre;
-    const teacherId    = req.body.teacherId;
-    const supervisorId = req.body.supervisorId;
-    const lieu         = req.body.lieu;
-    const statut       = req.body.statut;
-    const format       = req.body.format;
-    const type         = req.body.type;
-
-    console.log('📦 PUT /groups/:id — body reçu:', {
-        id: req.params.id, titre, ville, lieu, statut, format, type
-    });
-
-    if (!titre) return res.status(400).json({ message: 'Titre obligatoire' });
-
-    const villeValue = (ville && ville.trim() !== '') ? ville.trim() : 'Thionville';
-
-    console.log('📍 Ville qui sera mise à jour:', villeValue);
-
+// PUT /groups/:id
+router.put('/:id', protect, canEdit, async (req, res) => {
+    if (!req.body.titre || !String(req.body.titre).trim()) return res.status(400).json({ message: 'Titre obligatoire' });
     try {
-        const group = await prisma.group.update({
-            where: { id: parseInt(req.params.id) },
-            data: {
-                titre,
-                teacherId:    teacherId    ? parseInt(teacherId)    : null,
-                supervisorId: supervisorId ? parseInt(supervisorId) : null,
-                lieu:         lieu         || null,
-                ville:        villeValue,                // ✅ toujours correct
-                statut:       statut        || 'INSCRIPTION',
-                format:       format        || 'OFFLINE',
-                type:         type          || 'GROUPE',
-            }
-        });
-        console.log('✅ Groupe modifié en BDD:', { id: group.id, titre: group.titre, ville: group.ville });
+        const data = buildData(req.body);
+        // Si le public n'est pas envoyé, on ne l'écrase pas
+        if (!AUDIENCES.includes(req.body.audience)) delete data.audience;
+        const group = await prisma.group.update({ where: { id: parseInt(req.params.id) }, data });
         res.json(group);
     } catch (err) {
-        console.error('❌ Erreur modification groupe:', err.message);
+        console.error('Erreur modification groupe:', err.message);
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
 
-// DELETE supprimer un groupe
-router.delete('/:id', protect, allowRoles('ADMIN'), async (req, res) => {
+// DELETE /groups/:id (admin)
+router.delete('/:id', protect, adminOnly, async (req, res) => {
+    const id = parseInt(req.params.id);
     try {
-        const enrollments = await prisma.enrollment.findMany({
-            where:  { groupId: parseInt(req.params.id) },
-            select: { id: true }
+        const group = await prisma.group.findUnique({
+            where: { id },
+            select: { id: true, _count: { select: { contracts: true, payments: true } } },
         });
-        const enrollmentIds = enrollments.map(e => e.id);
-        if (enrollmentIds.length > 0) {
-            await prisma.attendance.deleteMany({
-                where: { enrollmentId: { in: enrollmentIds } }
+        if (!group) return res.status(404).json({ message: 'Groupe non trouvé' });
+
+        // Protection comptable : les contrats seraient supprimés en cascade
+        if (group._count.contracts > 0 || group._count.payments > 0) {
+            return res.status(409).json({
+                message: `Ce groupe a ${group._count.contracts} contrat(s) et ${group._count.payments} paiement(s). Passez-le au statut « Terminé » plutôt que de le supprimer.`,
             });
         }
-        await prisma.enrollment.deleteMany({ where: { groupId: parseInt(req.params.id) } });
-        await prisma.group.delete({ where: { id: parseInt(req.params.id) } });
+
+        // Inscriptions, présences et liaisons aux cours sont supprimées en cascade
+        await prisma.group.delete({ where: { id } });
         res.json({ message: 'Groupe supprimé' });
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });

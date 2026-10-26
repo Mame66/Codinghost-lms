@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
 const { sendHomeworkCorrectedEmail, sendSafe } = require('../services/emailService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const { resolveStudentId } = require('../lib/access');
+const { isPlaceholderEmail } = require('../lib/credentials');
 
 // ✅ GET devoirs — Admin voit tout, Enseignant voit SEULEMENT ses groupes
 router.get('/', protect, async (req, res) => {
@@ -57,6 +58,13 @@ router.get('/', protect, async (req, res) => {
                 },
                 orderBy: { createdAt: 'desc' }
             });
+        } else if (req.user.role === 'STUDENT') {
+            const sid = await resolveStudentId(req.user);
+            homeworks = sid ? await prisma.homework.findMany({
+                where: { studentId: sid },
+                include: { task: { select: { id: true, titre: true, type: true } }, files: true },
+                orderBy: { createdAt: 'desc' },
+            }) : [];
         }
 
         res.json(homeworks);
@@ -67,10 +75,13 @@ router.get('/', protect, async (req, res) => {
 });
 
 // ✅ GET devoirs d'un étudiant spécifique
+// /homeworks/student/me pour l'élève connecté ; un élève ne peut lire que les siens
 router.get('/student/:studentId', protect, async (req, res) => {
     try {
+        const studentId = await resolveStudentId(req.user, req.params.studentId === 'me' ? null : req.params.studentId);
+        if (!studentId) return res.json([]);
         const homeworks = await prisma.homework.findMany({
-            where: { studentId: parseInt(req.params.studentId) },
+            where: { studentId },
             include: {
                 task: { select: { titre: true, type: true } },
                 files: true,
@@ -85,12 +96,15 @@ router.get('/student/:studentId', protect, async (req, res) => {
 
 // ✅ POST soumettre un devoir
 router.post('/', protect, async (req, res) => {
-    const { taskId, studentId, contenu, lienRendu, qcmAnswers, qcmSoumis } = req.body;
+    const { taskId, contenu, lienRendu, qcmAnswers, qcmSoumis } = req.body;
     try {
+        // Un élève soumet toujours pour lui-même (le studentId envoyé est ignoré)
+        const studentId = await resolveStudentId(req.user, req.body.studentId);
+        if (!studentId) return res.status(400).json({ message: 'Élève introuvable' });
         const existing = await prisma.homework.findFirst({
             where: {
                 taskId:    parseInt(taskId),
-                studentId: parseInt(studentId),
+                studentId,
             }
         });
 
@@ -136,7 +150,7 @@ router.post('/', protect, async (req, res) => {
         const homework = await prisma.homework.create({
             data: {
                 taskId:     parseInt(taskId),
-                studentId:  parseInt(studentId),
+                studentId,
                 contenu,
                 lienRendu,
                 qcmAnswers,
@@ -149,11 +163,11 @@ router.post('/', protect, async (req, res) => {
         // Notification au prof du groupe
         try {
             const studentEnrollment = await prisma.enrollment.findFirst({
-                where: { studentId: parseInt(studentId) },
+                where: { studentId },
                 include: { group: { include: { teacher: true } } }
             });
             const student = await prisma.student.findUnique({
-                where: { id: parseInt(studentId) },
+                where: { id: studentId },
                 include: { user: true }
             });
             const task = await prisma.task.findUnique({
@@ -232,7 +246,7 @@ router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => 
 
         // ✅ Email à l'étudiant ou au parent
         const emailDest = homework.student?.parentEmail || homework.student?.user?.email;
-        if (emailDest && !emailDest.includes('@codinghost.fr')) {
+        if (emailDest && !isPlaceholderEmail(emailDest)) {
             const studentName = `${homework.student?.user?.prenom} ${homework.student?.user?.nom}`;
             const groupName   = homework.student?.enrollments?.[0]?.group?.titre || '';
             const teacherName = `${req.user.prenom} ${req.user.nom}`;

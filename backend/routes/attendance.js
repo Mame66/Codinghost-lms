@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
 const { sendAbsenceEmail, sendSafe } = require('../services/emailService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const { isPlaceholderEmail } = require('../lib/credentials');
 
 // ── Helper : envoyer email absence ───────────────────────
 const notifyAbsence = async (enrollmentId, date, prisma, req) => {
@@ -24,7 +24,7 @@ const notifyAbsence = async (enrollmentId, date, prisma, req) => {
         if (!enrollment) return;
 
         const parentEmail = enrollment.student?.parentEmail;
-        if (!parentEmail || parentEmail.includes('@codinghost.fr')) return;
+        if (!parentEmail || isPlaceholderEmail(parentEmail)) return;
 
         const studentName = `${enrollment.student?.user?.prenom} ${enrollment.student?.user?.nom}`;
         const teacherName = req.user ? `${req.user.prenom} ${req.user.nom}` : '';
@@ -48,14 +48,14 @@ const notifyAbsence = async (enrollmentId, date, prisma, req) => {
 };
 
 // GET présences d'un groupe
-router.get('/group/:groupId', protect, async (req, res) => {
+router.get('/group/:groupId', protect, allowRoles('ADMIN', 'TEACHER', 'TEACHER_VIEW'), async (req, res) => {
     try {
         const enrollments = await prisma.enrollment.findMany({
             where: { groupId: parseInt(req.params.groupId) },
             include: {
                 student: {
                     include: {
-                        user: { select: { nom: true, prenom: true } }
+                        user: { select: { nom: true, prenom: true, login: true, avatarUrl: true } }
                     }
                 },
                 attendance: {

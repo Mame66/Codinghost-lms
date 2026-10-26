@@ -6,24 +6,35 @@ export default function MyGrades() {
     const [homeworks, setHomeworks] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => { fetchGrades(); }, []);
+    useEffect(() => { fetchGrades(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchGrades = async () => {
-        try {
-            const meRes = await api.get('/auth/me');
-            const studentsRes = await api.get('/students');
-            const student = studentsRes.data.find(s => s.user?.login === meRes.data.login);
-            if (student) {
-                const hwRes = await api.get(`/homeworks/student/${student.id}`);
-                setHomeworks(hwRes.data.filter(h => h.statut === 'CORRIGE'));
-            }
-        } catch (err) { console.error(err); }
+        // Devoirs des leçons + quiz + anciens devoirs, uniquement ceux de l'élève connecté
+        const [res, old] = await Promise.allSettled([api.get('/content/my-results'), api.get('/homeworks/student/me')]);
+        const items = [];
+        const where = (ch) => [ch?.course?.titre, ch?.module?.titre].filter(Boolean).join(' › ');
+        if (res.status === 'fulfilled') {
+            res.value.data.submissions.filter(x => x.statut === 'CORRIGE' && x.note != null).forEach(x => items.push({
+                id: `s${x.id}`, type: 'DEVOIR', titre: x.chapter?.titre, where: where(x.chapter), note: x.note, commentaire: x.commentaire, date: x.correctedAt || x.submittedAt, verb: 'Corrigé le',
+            }));
+            res.value.data.quizzes.filter(q => q.quizScore != null).forEach(q => items.push({
+                id: `q${q.chapterId}`, type: 'QCM', titre: `Quiz — ${q.chapter?.titre}`, where: where(q.chapter), note: q.quizScore,
+                commentaire: q.quizTotal ? `${q.quizCorrect}/${q.quizTotal} bonnes réponses` : null, date: q.updatedAt, verb: 'Fait le',
+            }));
+        }
+        if (old.status === 'fulfilled') {
+            old.value.data.filter(h => h.statut === 'CORRIGE').forEach(h => items.push({
+                id: `h${h.id}`, type: h.task?.type || 'DEVOIR', titre: h.task?.titre || `Devoir #${h.id}`, where: '', note: h.note, commentaire: h.commentaire, date: h.createdAt, verb: 'Corrigé le',
+            }));
+        }
+        items.sort((a, b) => new Date(b.date) - new Date(a.date));
+        setHomeworks(items);
         setLoading(false);
     };
 
     const typeConfig = {
         SLIDE:  { icon: 'slide',    label: 'Slide',  color: '#5B2EE8', bg: '#EDE8FF' },
-        QCM:    { icon: 'qcm',      label: 'QCM',    color: '#008060', bg: '#ECFDF5' },
+        QCM:    { icon: 'qcm',      label: 'Quiz',   color: '#008060', bg: '#ECFDF5' },
         DEVOIR: { icon: 'document', label: 'Devoir', color: '#CC3300', bg: '#FFF0EB' },
     };
 
@@ -64,7 +75,7 @@ export default function MyGrades() {
                     </div>
                     <div style={s.moyenneRight}>
                         {[
-                            { icon: 'check_circle', val: homeworks.length,                                     lbl: 'Corrigés' },
+                            { icon: 'check_circle', val: homeworks.length,                                     lbl: 'Notes' },
                             { icon: 'check',        val: homeworks.filter(h => (h.note || 0) >= 10).length,    lbl: '≥ 10/20' },
                             { icon: 'star',         val: `${Math.max(...homeworks.map(h => h.note || 0))}/20`, lbl: 'Meilleure' },
                         ].map((st, i) => (
@@ -84,20 +95,21 @@ export default function MyGrades() {
                 <div style={{ background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', padding: '60px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                     <IconBadge icon="star" color="#9CA3AF" bg="#F3F4F6" size={56} iconSize={28} />
                     <div style={{ fontFamily: 'sans-serif', fontSize: '18px', fontWeight: '800', color: '#1A1040' }}>Aucune note pour l'instant</div>
-                    <div style={{ color: '#6B7280', fontSize: '13px' }}>Vos notes apparaîtront ici une fois vos devoirs corrigés</div>
+                    <div style={{ color: '#6B7280', fontSize: '13px' }}>Les notes des quiz et des devoirs corrigés apparaîtront ici</div>
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {homeworks.map(hw => {
                         const mention = getMention(hw.note || 0);
-                        const tc = typeConfig[hw.task?.type] || typeConfig.DEVOIR;
+                        const tc = typeConfig[hw.type] || typeConfig.DEVOIR;
                         return (
                             <div key={hw.id} style={s.gradeCard}>
                                 <IconBadge icon={tc.icon} color={tc.color} bg={tc.bg} size={44} iconSize={22} />
                                 <div style={{ flex: 1 }}>
                                     <div style={{ fontFamily: 'sans-serif', fontSize: '14px', fontWeight: '800', color: '#1A1040', marginBottom: '4px' }}>
-                                        {hw.task?.titre || `Devoir #${hw.id}`}
+                                        {hw.titre}
                                     </div>
+                                    {hw.where && <div style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '4px' }}>{hw.where}</div>}
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '4px' }}>
                                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '50px', fontSize: '11px', fontWeight: '800', background: tc.bg, color: tc.color }}>
                                             <Ic name={tc.icon} size={10} color={tc.color} /> {tc.label}
@@ -105,7 +117,7 @@ export default function MyGrades() {
                                         <span style={{ color: '#D1D5DB', fontSize: '12px' }}>•</span>
                                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#6B7280' }}>
                                             <Ic name="calendar" size={11} color="#9CA3AF" />
-                                            Corrigé le {new Date(hw.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                            {hw.verb} {new Date(hw.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
                                         </span>
                                     </div>
                                     {hw.commentaire && (
@@ -140,4 +152,4 @@ const s = {
     moyenneRight: { display: 'flex', gap: '16px', flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' },
     moyenneStat: { background: 'rgba(255,255,255,0.1)', borderRadius: '12px', padding: '14px 20px', textAlign: 'center' },
     gradeCard: { background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: '14px' },
-};
+};

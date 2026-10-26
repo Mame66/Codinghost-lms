@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
+import '../styles/course.css';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
+import ResourceViewer, { KindBadge } from '../components/course/ResourceViewer';
+import StudentHomework from '../components/course/StudentHomework';
+import { KINDS, resourceKind, formatSize } from '../utils/files';
 
 // ════════════════════════════════════════════════════════════
 // ICÔNES
@@ -72,26 +76,25 @@ export default function Course() {
     const [studentId,   setStudentId]   = useState(null);
     const [progress,    setProgress]    = useState({});
     const [copiedCode,  setCopiedCode]  = useState(false);
+    const [viewing,     setViewing]     = useState(null);
 
     const [quizQuestions, setQuizQuestions] = useState([]);
     const [quizAnswers,   setQuizAnswers]   = useState({});
     const [quizDone,      setQuizDone]      = useState(false);
     const [quizResult,    setQuizResult]    = useState(null);
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const isKid = user?.audience !== 'ADULTE';
 
     const fetchData = async () => {
         try {
-            const meRes = await api.get('/auth/me');
-            const res   = await api.get('/courses/my');
+            const res = await api.get('/courses/my');
             setCourses(res.data);
             try {
-                const stRes = await api.get('/students');
-                const st    = stRes.data.find(s => s.user?.login === meRes.data.login);
-                if (st) {
-                    setStudentId(st.id);
-                    await loadAllProgress(res.data, st.id);
-                }
+                // ✅ fiche de l'élève connecté (avant : téléchargement de TOUS les élèves)
+                const st = await api.get('/students/me');
+                setStudentId(st.data.id);
+                await loadAllProgress(res.data, st.data.id);
             } catch {}
         } catch (err) { console.error(err); }
         setLoading(false);
@@ -120,14 +123,23 @@ export default function Course() {
         return { pct: Math.round((done / total) * 100), done, total };
     };
 
+    const reloadProgress = async () => {
+        if (!studentId || !selCourse) return;
+        try {
+            const res = await api.get(`/lessons/progress/course/${selCourse.id}/student/${studentId}`);
+            setProgress(prev => {
+                const map = { ...prev };
+                res.data.forEach(mod => { mod.lessons.forEach(l => { map[l.lessonId] = l; }); });
+                return map;
+            });
+        } catch (err) { console.error(err); }
+    };
+
     const markDone = async (element) => {
         if (!studentId || !selLesson) return;
         try {
             await api.post(`/lessons/progress/lesson/${selLesson.id}`, { studentId, element });
-            const res = await api.get(`/lessons/progress/course/${selCourse.id}/student/${studentId}`);
-            const map = { ...progress };
-            res.data.forEach(mod => { mod.lessons.forEach(l => { map[l.lessonId] = l; }); });
-            setProgress(map);
+            await reloadProgress();
         } catch (err) { console.error(err); }
     };
 
@@ -322,15 +334,26 @@ export default function Course() {
                     <Ic name="book" size={34} color="#9CA3AF"/>
                 </div>
                 <div style={{ fontWeight:'800', fontSize:'20px', color:'#1A1040' }}>Aucun cours disponible</div>
-                <div style={{ color:'#9CA3AF', fontSize:'14px' }}>Vous n'êtes pas encore inscrit à un groupe avec un cours.</div>
+                <div style={{ color:'#9CA3AF', fontSize:'14px', textAlign:'center', maxWidth:'360px' }}>
+                    {isKid ? "Ton cours n'est pas encore ouvert. Demande à ton prof !" : "Aucune formation n'est encore associée à votre groupe. Contactez l'école si cela vous semble anormal."}
+                </div>
             </div>
         );
 
         return (
             <div>
                 <div style={{ marginBottom:'24px' }}>
-                    <div style={{ fontFamily:'sans-serif', fontSize:'24px', fontWeight:'900', color:'#1A1040' }}>Bonjour{user?.prenom ? `, ${user.prenom}` : ''} 👋</div>
-                    <div style={{ fontSize:'14px', color:'#9CA3AF', marginTop:'4px' }}>Choisissez un cours pour continuer votre apprentissage</div>
+                    {isKid ? (
+                        <>
+                            <div style={{ fontFamily:"'Fredoka','Plus Jakarta Sans',sans-serif", fontSize:'28px', fontWeight:'700', color:'#1E1B4B' }}>Salut{user?.prenom ? ` ${user.prenom}` : ''} ! 🚀</div>
+                            <div style={{ fontSize:'15px', color:'#6B6480', marginTop:'4px' }}>Choisis un cours et continue ton aventure.</div>
+                        </>
+                    ) : (
+                        <>
+                            <div style={{ fontFamily:"'Fraunces',Georgia,serif", fontSize:'28px', fontWeight:'600', color:'#0B1B3F' }}>Bonjour{user?.prenom ? ` ${user.prenom}` : ''}</div>
+                            <div style={{ fontSize:'14px', color:'#64748B', marginTop:'4px' }}>Reprenez votre formation là où vous l'avez laissée.</div>
+                        </>
+                    )}
                 </div>
 
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px,1fr))', gap:'20px' }}>
@@ -412,8 +435,8 @@ export default function Course() {
         const modules = selCourse?.modules || [];
 
         return (
-            <div style={s.layout}>
-                <div style={s.sidebar}>
+            <div style={s.layout} className="ch-course-layout">
+                <div style={s.sidebar} className="ch-course-side">
                     {/* Sélecteur de cours */}
                     <div style={{ padding:'14px 16px', borderBottom:'1px solid #F3F4F6' }}>
                         <div style={{ fontSize:'10px', fontWeight:'800', color:'#9CA3AF', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'8px' }}>Cours</div>
@@ -517,13 +540,13 @@ export default function Course() {
                         </div>
                     ) : (
                         <>
-                            <div style={s.mainHeader}>
+                            <div style={s.mainHeader} className="ch-course-pad">
                                 <div style={{ fontSize:'11px', color:'#9CA3AF', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px' }}>{selCourse?.titre}</div>
                                 <h1 style={s.mainTitle}>{selModule.titre}</h1>
                                 {selModule.description && <div style={{ fontSize:'14px', color:'#6B7280', lineHeight:1.6, marginTop:'4px' }}>{selModule.description}</div>}
                             </div>
 
-                            <div style={{ padding:'24px 32px', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:'16px' }}>
+                            <div className="ch-course-pad" style={{ padding:'24px 32px', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px,1fr))', gap:'16px' }}>
                                 {(selModule.chapters||[]).map((lesson, li) => {
                                     const lp  = getLessonProg(lesson.id);
                                     const pct = lp?.pct || 0;
@@ -559,23 +582,32 @@ export default function Course() {
     // ════════════════════════════════════════════════════════
     // VUE LEÇON
     // ════════════════════════════════════════════════════════
+    const viewer = viewing && (
+        <ResourceViewer resource={viewing} onClose={() => setViewing(null)}
+                        onOpened={() => { if (!getLessonProg(selLesson?.id)?.progress?.filesDone) markDone('files'); }}/>
+    );
+
     if (view === 'lesson' && selLesson) {
         const lesson  = selLesson;
         const lp      = getLessonProg(lesson.id);
         const hasQuiz = (lesson.quizQuestions||[]).length > 0;
         const prog    = lp?.progress || {};
 
+        const docs = lesson.resources || [];
         const ELEMENTS_DISPLAY = [
             lesson.objectives       && { key:'objectives', label:'Objectifs', icon:'target',  color:'#8B5CF6', bg:'#EDE9FE', done:prog.objectivesDone },
+            docs.length > 0         && { key:'files',      label:'Documents', icon:'book',    color:'#4338CA', bg:'#EEF2FF', done:prog.filesDone },
             lesson.studentSlidesUrl && { key:'slides',     label:'Slides',    icon:'slide',   color:'#5B2EE8', bg:'#EDE8FF', done:prog.slidesDone },
             lesson.imageUrl         && { key:'images',     label:'Image',     icon:'image',   color:'#059669', bg:'#ECFDF5', done:prog.imagesDone },
             hasQuiz                 && { key:'quiz',       label:'Quiz',      icon:'qcm',     color:'#D97706', bg:'#FFFBEB', done:prog.quizSoumis },
             lesson.challengeContent && { key:'challenge',  label:'Challenge', icon:'code',    color:'#DC2626', bg:'#FEF2F2', done:prog.challengeDone },
+            lesson.homeworkEnabled  && { key:'homework',   label:'Devoir',    icon:'send',    color:'#BE123C', bg:'#FFF1F2', done:!!lp?.submission },
         ].filter(Boolean);
 
         return (
-            <div style={s.layout}>
-                <div style={s.sidebar}>
+            <div style={s.layout} className="ch-course-layout">
+                {viewer}
+                <div style={s.sidebar} className="ch-course-side">
                     <div style={{ padding:'14px 16px', borderBottom:'1px solid #F3F4F6' }}>
                         <button style={{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'6px 12px', background:'#F5F2FF', border:'1px solid #EDE8FF', borderRadius:'8px', color:'#5B2EE8', fontWeight:'700', fontSize:'12px', cursor:'pointer', fontFamily:'inherit' }}
                                 onClick={() => setView('modules')}>
@@ -610,12 +642,12 @@ export default function Course() {
                 </div>
 
                 <div style={s.main}>
-                    <div style={s.mainHeader}>
+                    <div style={s.mainHeader} className="ch-course-pad">
                         <div style={{ fontSize:'11px', color:'#9CA3AF', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px' }}>{selModule?.titre}</div>
                         <h1 style={s.mainTitle}>{lesson.titre}</h1>
                     </div>
 
-                    <div style={{ padding:'24px 32px', display:'flex', flexDirection:'column', gap:'20px' }}>
+                    <div className="ch-course-pad" style={{ padding:'24px 32px', display:'flex', flexDirection:'column', gap:'20px' }}>
 
                         {/* Objectifs */}
                         {lesson.objectives && (
@@ -633,6 +665,35 @@ export default function Course() {
                                     </button>
                                 )}
                                 {prog.objectivesDone && <div style={{ marginTop:'8px', fontSize:'12px', color:'#059669', fontWeight:'700', display:'flex', alignItems:'center', gap:'4px' }}><Ic name="check" size={12} color="#059669"/> Lu ✓</div>}
+                            </div>
+                        )}
+
+                        {/* Documents */}
+                        {docs.length > 0 && (
+                            <div style={{ background:'#fff', border:'1px solid #E0E7FF', borderRadius:'14px', padding:'20px' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
+                                    <div style={{ width:'32px', height:'32px', background:'#4338CA', borderRadius:'9px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                        <Ic name="book" size={16} color="#fff"/>
+                                    </div>
+                                    <div style={{ fontFamily:'sans-serif', fontSize:'15px', fontWeight:'800', color:'#1A1040' }}>{isKid ? 'Tes documents' : 'Documents'}</div>
+                                    {prog.filesDone && <span style={{ marginLeft:'auto', fontSize:'12px', color:'#059669', fontWeight:'700' }}>✅ Consultés</span>}
+                                </div>
+                                <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                                    {docs.map(r => {
+                                        const k = KINDS[resourceKind(r)] || KINDS.other;
+                                        return (
+                                            <button key={r.id} type="button" onClick={() => setViewing(r)}
+                                                    style={{ display:'flex', alignItems:'center', gap:'12px', padding:'10px 12px', borderRadius:'12px', border:'1px solid #EEF2FF', background:'#FAFBFF', cursor:'pointer', fontFamily:'inherit', textAlign:'left', width:'100%' }}>
+                                                <KindBadge resource={r} size={38}/>
+                                                <span style={{ flex:1, minWidth:0 }}>
+                                                    <span style={{ display:'block', fontSize:'14px', fontWeight:'700', color:'#1A1040', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.titre}</span>
+                                                    <span style={{ fontSize:'12px', color:'#9CA3AF' }}>{k.label}{r.size ? ` · ${formatSize(r.size)}` : ''}</span>
+                                                </span>
+                                                <span style={{ fontSize:'13px', fontWeight:'800', color:'#4338CA', whiteSpace:'nowrap' }}>{r.kind === 'LINK' ? 'Ouvrir ↗' : 'Ouvrir'}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         )}
 
@@ -704,6 +765,17 @@ export default function Course() {
                                 </button>
                             </div>
                         )}
+
+                        {/* Devoir à rendre */}
+                        {lesson.homeworkEnabled && (
+                            <StudentHomework key={lesson.id} lesson={lesson} kid={isKid} onSubmitted={(sub) => { setSelLesson(l => ({ ...l, mySubmission:sub })); reloadProgress(); }}/>
+                        )}
+
+                        {ELEMENTS_DISPLAY.length === 0 && (
+                            <div style={{ textAlign:'center', padding:'40px 20px', color:'#9CA3AF', fontSize:'14px' }}>
+                                {isKid ? 'Ton prof n\'a pas encore ajouté de contenu à cette leçon.' : 'Le contenu de cette leçon sera bientôt disponible.'}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -724,4 +796,4 @@ const s = {
     fsBack:    { display:'inline-flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'#F5F2FF', border:'1px solid #EDE8FF', borderRadius:'9px', color:'#5B2EE8', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' },
     btnPri:    { display:'inline-flex', alignItems:'center', gap:'6px', padding:'10px 20px', background:'#5B2EE8', border:'none', borderRadius:'10px', color:'#fff', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' },
     btnSec:    { display:'inline-flex', alignItems:'center', gap:'6px', padding:'9px 16px', background:'transparent', border:'1.5px solid #E5E7EB', borderRadius:'9px', color:'#374151', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' },
-};
+};
