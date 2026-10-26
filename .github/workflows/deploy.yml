@@ -33,15 +33,15 @@ jobs:
           CI: false
 
       - name: 🚀 Deploy to IONOS via SFTP
-        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
-        with:
-          username: ${{ secrets.SFTP_USERNAME }}
-          server: access-5019368371.webspace-host.com
-          port: 22
-          password: ${{ secrets.SFTP_PASSWORD }}
-          local_path: ./frontend/build/*
-          remote_path: /lms-frontend/
-          sftp_only: true
+        run: |
+          sudo apt-get install -y lftp
+          lftp -c "
+            set sftp:auto-confirm yes;
+            set net:timeout 30;
+            open sftp://${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}@access-5019368371.webspace-host.com:22;
+            mirror -R --delete --verbose ./frontend/build/ /lms-frontend/;
+            bye
+          "
 
       - name: ✅ Succès
         if: success()
