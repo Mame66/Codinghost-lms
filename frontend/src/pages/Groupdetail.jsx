@@ -1,6 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
+import Avatar from '../components/Avatar';
+import { AUDIENCES, AudienceBadge } from '../utils/audience';
+
+// Échappe le texte injecté dans la fenêtre d'impression
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const Icon = ({ name, size = 16, color = 'currentColor' }) => {
     const a = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: '1.8', strokeLinecap: 'round', strokeLinejoin: 'round' };
@@ -32,12 +38,6 @@ const Icon = ({ name, size = 16, color = 'currentColor' }) => {
     return icons[name] ? <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{icons[name]}</span> : null;
 };
 
-const Av = ({ text, size = 36 }) => (
-    <div style={{ width: size, height: size, borderRadius: '50%', background: 'linear-gradient(135deg,#5B2EE8,#8B5CF6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.32, fontWeight: '700', flexShrink: 0 }}>
-        {text}
-    </div>
-);
-
 const Chip = ({ color, bg, border, children }) => (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', color, background: bg, border: `1px solid ${border || 'transparent'}` }}>
     {children}
@@ -51,16 +51,18 @@ const ATT = {
     NON_COMMENCE: { color: '#9CA3AF', bg: '#F9FAFB', border: '#E5E7EB', lbl: '—' },
 };
 
-const TASK_CFG = {
-    SLIDE:  { icon: 'slide', color: '#5B2EE8', bg: '#EDE8FF', lbl: 'Slide' },
-    QCM:    { icon: 'qcm',   color: '#059669', bg: '#ECFDF5', lbl: 'QCM' },
-    DEVOIR: { icon: 'file',  color: '#DC2626', bg: '#FEF2F2', lbl: 'Devoir' },
-};
 
-export default function GroupDetail({ groupId, onBack }) {
+export default function GroupDetail({ groupId: groupIdProp, onBack: onBackProp }) {
+    // ✅ FIX : l'id vient de l'URL (/groups/:id). Avant, groupId était toujours
+    // undefined → la page restait bloquée sur « Chargement... ».
+    const params   = useParams();
+    const navigate = useNavigate();
+    const groupId  = groupIdProp ?? params.id;
+    const onBack   = onBackProp ?? (() => navigate('/groups'));
+
     const { user } = useAuth();
     const isAdmin = user?.role === 'ADMIN';
-    const printRef = useRef();
+    const canEdit = ['ADMIN', 'TEACHER'].includes(user?.role);
 
     const [group, setGroup]       = useState(null);
     const [courses, setCourses]   = useState([]);
@@ -78,29 +80,36 @@ export default function GroupDetail({ groupId, onBack }) {
 
     // Add student modal
     const [showAdd, setShowAdd]   = useState(false);
-    const [addForm, setAddForm]   = useState({ prenom: '', nom: '', age: '', parentNom: '', parentTel: '', parentEmail: '' });
+    const [addForm, setAddForm]   = useState({ prenom: '', nom: '', age: '', email: '', telephone: '', parentNom: '', parentTel: '', parentEmail: '' });
     const [adding, setAdding]     = useState(false);
     const [newCreds, setNewCreds] = useState(null);
 
-    useEffect(() => { if (groupId) { load(); loadCourses(); } }, [groupId]);
+    const [loadError, setLoadError] = useState('');
+
+    useEffect(() => {
+        if (groupId) { load(); loadCourses(); }
+        else setLoading(false);
+    }, [groupId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const load = async () => {
         setLoading(true);
-        try { const r = await api.get(`/groups/${groupId}`); setGroup(r.data); }
-        catch (e) { console.error(e); }
-        setLoading(false);
+        setLoadError('');
+        try {
+            const r = await api.get(`/groups/${groupId}`);
+            setGroup(r.data);
+        } catch (e) {
+            setGroup(null);
+            setLoadError(e.response?.status === 404 ? 'Groupe introuvable' : (e.response?.data?.message || 'Impossible de charger le groupe'));
+        } finally {
+            setLoading(false);
+        }
     };
 
     const loadCourses = async () => {
         try {
             const r = await api.get(`/groups/${groupId}/courses`);
             setCourses(r.data);
-        } catch {
-            try {
-                const r = await api.get('/courses');
-                setCourses(r.data.filter(c => c.courseGroups?.some(cg => cg.groupId === +groupId)));
-            } catch (e) { console.error(e); }
-        }
+        } catch (e) { console.error(e); }
     };
 
     const copyText = (text, key) => {
@@ -113,9 +122,9 @@ export default function GroupDetail({ groupId, onBack }) {
         if (!addForm.prenom || !addForm.nom) return alert('Prénom et nom obligatoires');
         setAdding(true);
         try {
-            const r = await api.post('/students', { ...addForm, groupId });
+            const r = await api.post('/students', { ...addForm, groupId: parseInt(groupId) });
             setNewCreds(r.data.credentials);
-            setAddForm({ prenom: '', nom: '', age: '', parentNom: '', parentTel: '', parentEmail: '' });
+            setAddForm({ prenom: '', nom: '', age: '', email: '', telephone: '', parentNom: '', parentTel: '', parentEmail: '' });
             setShowAdd(false);
             load();
         } catch (e) { alert(e.response?.data?.message || 'Erreur'); }
@@ -133,9 +142,11 @@ export default function GroupDetail({ groupId, onBack }) {
     // Print students list
     const handlePrint = () => {
         const enrollments = group?.enrollments || [];
+        const loginUrl = `codinghost.fr/login/${AUDIENCES[group?.audience]?.slug || ''}`;
         const win = window.open('', '_blank');
+        if (!win) { alert('Autorisez les fenêtres pop-up pour imprimer la liste.'); return; }
         win.document.write(`
-      <html><head><title>${group?.titre} — Liste étudiants</title>
+      <html><head><title>${esc(group?.titre)} — Liste étudiants</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; padding: 32px; background: #fff; color: #111; }
@@ -151,22 +162,22 @@ export default function GroupDetail({ groupId, onBack }) {
         .url { color: #5B2EE8; }
         @media print { body { padding: 20px; } }
       </style></head><body>
-      <h1>${group?.titre}</h1>
+      <h1>${esc(group?.titre)}</h1>
       <div class="meta">
-        ${group?.teacher ? `👨‍🏫 ${group.teacher.prenom} ${group.teacher.nom} · ` : ''}
-        ${group?.lieu ? `📍 ${group.lieu} · ` : ''}
+        ${group?.teacher ? `👨‍🏫 ${esc(group.teacher.prenom)} ${esc(group.teacher.nom)} · ` : ''}
+        ${group?.lieu ? `📍 ${esc(group.lieu)} · ` : ''}
         ${enrollments.length} étudiant(s)
       </div>
       <div class="grid">
         ${enrollments.map(e => `
           <div class="card">
-            <div class="av">${(e.student?.user?.prenom?.[0]||'').toUpperCase()}</div>
+            <div class="av">${esc((e.student?.user?.prenom?.[0]||'').toUpperCase())}</div>
             <div>
-              <div class="name">${e.student?.user?.prenom || ''} ${e.student?.user?.nom || ''}</div>
-              <div class="row"><span class="label">Login :</span> <span class="val">${e.student?.user?.login || ''}</span></div>
-              <div class="row"><span class="label">Password :</span> <span class="val">${e.student?.user?.plainPassword || '—'}</span></div>
-              <div class="row"><span class="label url">🖥</span> <span style="color:#5B2EE8">codinghost.fr</span></div>
-              ${e.student?.parentTel ? `<div class="row"><span class="label">📞</span> ${e.student.parentTel}</div>` : ''}
+              <div class="name">${esc(e.student?.user?.prenom)} ${esc(e.student?.user?.nom)}</div>
+              <div class="row"><span class="label">Login :</span> <span class="val">${esc(e.student?.user?.login)}</span></div>
+              <div class="row"><span class="label">Mot de passe :</span> <span class="val">${esc(e.student?.user?.plainPassword || '—')}</span></div>
+              <div class="row"><span class="label url">🖥</span> <span style="color:#5B2EE8">${loginUrl}</span></div>
+              ${e.student?.parentTel ? `<div class="row"><span class="label">📞</span> ${esc(e.student.parentTel)}</div>` : ''}
             </div>
           </div>
         `).join('')}
@@ -178,7 +189,14 @@ export default function GroupDetail({ groupId, onBack }) {
     };
 
     if (loading) return <div style={{ padding: '60px', textAlign: 'center', color: '#9CA3AF' }}>Chargement...</div>;
-    if (!group)  return <div style={{ padding: '60px', textAlign: 'center', color: '#9CA3AF' }}>Groupe introuvable</div>;
+    if (!group) return (
+        <div style={{ padding: '60px', textAlign: 'center', color: '#6B7280' }}>
+            <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px' }}>{loadError || 'Groupe introuvable'}</div>
+            <button style={g.btnSec} onClick={onBack}>← Retour aux groupes</button>
+        </div>
+    );
+    const A = AUDIENCES[group.audience] || AUDIENCES.ENFANT;
+    const isKidGroup = group.audience !== 'ADULTE';
 
     const enrollments = group.enrollments || [];
     const filtEnrollments = enrollments.filter(e => {
@@ -207,17 +225,19 @@ export default function GroupDetail({ groupId, onBack }) {
             {/* ── Info header ── */}
             <div style={g.header}>
                 <div style={g.headerLeft}>
-                    <div style={g.hAv}>{group.titre?.[0]}{group.titre?.[1]}</div>
+                    <div style={{ ...g.hAv, background: A.gradient }}>{group.titre?.[0]}{group.titre?.[1]}</div>
                     <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
                             <h1 style={g.hTitle}>{group.titre}</h1>
+                            <AudienceBadge audience={group.audience} />
                             <Chip color={sc.c} bg={sc.bg} border={sc.br}>{sc.lbl}</Chip>
                             <Chip color="#6B7280" bg="#F3F4F6">
                                 {group.format === 'OFFLINE' ? 'Présentiel' : group.format === 'ONLINE' ? 'En ligne' : 'Hybride'}
                             </Chip>
                         </div>
                         <div style={g.hMeta}>
-                            {group.teacher && <span style={g.mChip}><Icon name="teacher" size={12} color="#6B7280" />{group.teacher.prenom} {group.teacher.nom}</span>}
+                            {group.teacher && <span style={g.mChip}><Avatar user={group.teacher} size={18} />{group.teacher.prenom} {group.teacher.nom}</span>}
+                            {group.ville && <span style={g.mChip}><Icon name="location" size={12} color="#6B7280" />{group.ville}</span>}
                             {group.supervisor && <span style={g.mChip}><Icon name="user" size={12} color="#6B7280" />Superviseur : {group.supervisor.prenom} {group.supervisor.nom}</span>}
                             {group.lieu && <span style={g.mChip}><Icon name="location" size={12} color="#6B7280" />{group.lieu}</span>}
                             <span style={g.mChip}><Icon name="users" size={12} color="#6B7280" />{enrollments.length} étudiant(s)</span>
@@ -255,16 +275,23 @@ export default function GroupDetail({ groupId, onBack }) {
                             <Icon name="search" size={14} color="#9CA3AF" />
                             <input style={g.searchIn} placeholder="Rechercher..." value={stuSearch} onChange={e => setStuSearch(e.target.value)} />
                         </div>
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             <button style={g.btnSec} onClick={() => setShowCreds(true)}>
                                 <Icon name="key" size={13} color="#5B2EE8" /> Identifiants
                             </button>
                             <button style={g.btnSec} onClick={handlePrint}>
                                 <Icon name="print" size={13} color="#5B2EE8" /> Imprimer liste
                             </button>
-                            <button style={g.btnPri} onClick={() => setShowAdd(true)}>
-                                <Icon name="plus" size={13} color="#fff" /> Ajouter étudiant
-                            </button>
+                            {canEdit && (
+                                <button style={g.btnSec} onClick={() => navigate(`/emails?group=${group.id}`)}>
+                                    ✉ {group.audience === 'ADULTE' ? 'Email au groupe' : 'Email aux parents'}
+                                </button>
+                            )}
+                            {canEdit && (
+                                <button style={g.btnPri} onClick={() => setShowAdd(true)}>
+                                    <Icon name="plus" size={13} color="#fff" /> Ajouter étudiant
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -273,15 +300,17 @@ export default function GroupDetail({ groupId, onBack }) {
                         <div style={g.empty}>
                             <div style={g.emptyIco}><Icon name="users" size={28} color="#9CA3AF" /></div>
                             <div style={g.emptyT}>Aucun étudiant dans ce groupe</div>
-                            <button style={g.btnPri} onClick={() => setShowAdd(true)}>
-                                <Icon name="plus" size={13} color="#fff" /> Ajouter le premier étudiant
-                            </button>
+                            {canEdit && (
+                                <button style={g.btnPri} onClick={() => setShowAdd(true)}>
+                                    <Icon name="plus" size={13} color="#fff" /> Ajouter le premier étudiant
+                                </button>
+                            )}
                         </div>
                     ) : (
                         <table style={g.table}>
                             <thead>
                             <tr>
-                                {['Nom, Prénom', 'Âge', 'Présences', 'Taux', 'Parent', 'Téléphone', 'Inscrit le'].map(h => (
+                                {['Nom, Prénom', ...(isKidGroup ? ['Âge'] : []), 'Présences', 'Taux', ...(isKidGroup ? ['Parent', 'Téléphone'] : ['Email', 'Téléphone']), 'Inscrit le'].map(h => (
                                     <th key={h} style={g.th}>{h}</th>
                                 ))}
                             </tr>
@@ -297,7 +326,7 @@ export default function GroupDetail({ groupId, onBack }) {
                                     <tr key={e.id} style={g.tr}>
                                         <td style={g.td}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                <Av text={`${e.student?.user?.prenom?.[0]||''}${e.student?.user?.nom?.[0]||''}`} size={32} />
+                                                <Avatar user={e.student?.user} size={32} />
                                                 <div>
                                                     <div style={{ fontWeight: '700', fontSize: '13px', color: '#111827' }}>
                                                         {e.student?.user?.prenom} {e.student?.user?.nom}
@@ -308,7 +337,7 @@ export default function GroupDetail({ groupId, onBack }) {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td style={g.td}>{e.student?.age ? `${e.student.age} ans` : '—'}</td>
+                                        {isKidGroup && <td style={g.td}>{e.student?.age ? `${e.student.age} ans` : '—'}</td>}
                                         <td style={g.td}>
                                             {/* Attendance dots like in photo */}
                                             <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap', maxWidth: '160px' }}>
@@ -328,11 +357,14 @@ export default function GroupDetail({ groupId, onBack }) {
                                             <div style={g.tauxBar}><div style={{ ...g.tauxFill, width: `${taux}%`, background: tc }} /></div>
                                             <div style={g.tauxSub}>{pr}/{att.length}</div>
                                         </td>
-                                        <td style={g.td}>{e.student?.parentNom || '—'}</td>
                                         <td style={g.td}>
-                                            {e.student?.parentTel ? (
+                                            {isKidGroup ? (e.student?.parentNom || '—')
+                                                : (e.student?.user?.email && !/@(eleve\.)?codinghost\.(fr|dz)$/.test(e.student.user.email) ? e.student.user.email : '—')}
+                                        </td>
+                                        <td style={g.td}>
+                                            {(isKidGroup ? e.student?.parentTel : e.student?.user?.telephone) ? (
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#374151' }}>
-                            <Icon name="phone" size={11} color="#9CA3AF" />{e.student.parentTel}
+                            <Icon name="phone" size={11} color="#9CA3AF" />{isKidGroup ? e.student.parentTel : e.student.user.telephone}
                           </span>
                                             ) : '—'}
                                         </td>
@@ -357,16 +389,17 @@ export default function GroupDetail({ groupId, onBack }) {
                         <div style={g.empty}>
                             <div style={g.emptyIco}><Icon name="book" size={28} color="#9CA3AF" /></div>
                             <div style={g.emptyT}>Aucun cours assigné à ce groupe</div>
-                            <div style={{ fontSize: '13px', color: '#9CA3AF', textAlign: 'center', lineHeight: 1.6, maxWidth: '280px' }}>
-                                Allez dans "Mes cours" et assignez ce groupe à un cours existant.
+                            <div style={{ fontSize: '13px', color: '#9CA3AF', textAlign: 'center', lineHeight: 1.6, maxWidth: '320px' }}>
+                                Ouvrez « Cours {A.label.toLowerCase()} », modifiez un cours et cochez ce groupe.
                             </div>
+                            <Link to={`/courses/${A.slug}`} style={{ ...g.btnSec, textDecoration: 'none' }}>Aller aux cours {A.label.toLowerCase()} →</Link>
                         </div>
                     ) : courses.map(course => {
                         const isExpanded = expandedCourse === course.id;
-                        const chaps = course.chapters || [];
+                        const modules = course.modules || [];
+                        const nbLessons = modules.reduce((n, m) => n + (m.chapters || []).length, 0);
                         return (
                             <div key={course.id} style={g.courseBlock}>
-                                {/* Course title bar */}
                                 <div style={g.courseTitleBar} onClick={() => setExpandedCourse(isExpanded ? null : course.id)}>
                                     <div style={g.courseTitleLeft}>
                                         <div style={g.courseIco}><Icon name="book" size={16} color="#5B2EE8" /></div>
@@ -374,16 +407,16 @@ export default function GroupDetail({ groupId, onBack }) {
                                             <div style={g.courseTitle}>{course.titre}</div>
                                             <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                                                 {course.niveau && <span style={g.miniChip}>{course.niveau}</span>}
-                                                <span style={g.miniChip}>{chaps.length} chapitre(s)</span>
+                                                <span style={g.miniChip}>{modules.length} module(s)</span>
+                                                <span style={g.miniChip}>{nbLessons} leçon(s)</span>
                                                 {course.lockedByAdmin
                                                     ? <span style={{ ...g.miniChip, background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA' }}><Icon name="lock" size={9} color="#DC2626" /> Verrouillé admin</span>
-                                                    : <span style={{ ...g.miniChip, background: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0' }}><Icon name="unlock" size={9} color="#059669" /> Ouvert</span>
+                                                    : <span style={{ ...g.miniChip, background: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0' }}><Icon name="unlock" size={9} color="#059669" /> Modifiable</span>
                                                 }
                                             </div>
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        {/* Admin lock button */}
                                         {isAdmin && (
                                             <button
                                                 style={{ ...g.lockBtn, ...(course.lockedByAdmin ? g.lockBtnUnlock : g.lockBtnLock) }}
@@ -397,64 +430,39 @@ export default function GroupDetail({ groupId, onBack }) {
                                     </div>
                                 </div>
 
-                                {/* Chapters — expanded */}
                                 {isExpanded && (
                                     <div style={g.chapContainer}>
-                                        {/* Table header like in the photo */}
                                         <div style={g.lessonTableHead}>
                                             <span style={{ minWidth: '30px' }}>#</span>
-                                            <span style={{ flex: 1 }}>Leçon / Tâche</span>
-                                            <span style={{ minWidth: '140px', textAlign: 'center' }}>Statut</span>
+                                            <span style={{ flex: 1 }}>Leçon</span>
+                                            <span style={{ minWidth: '220px', textAlign: 'right' }}>Contenu</span>
                                         </div>
-
-                                        {chaps.map((chap, ci) => (
-                                            <div key={chap.id}>
-                                                {/* Chapter row — pink background like photo */}
+                                        {modules.map(mod => (
+                                            <div key={mod.id}>
                                                 <div style={g.chapGroupHeader}>
-                                                    <span style={g.chapGroupName}>{chap.titre}</span>
-                                                    {chap.locked
-                                                        ? <span style={{ ...g.statusBadge, background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA' }}><Icon name="lock" size={10} color="#DC2626" /> Fermé</span>
-                                                        : <span style={{ ...g.statusBadge, background: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0' }}><Icon name="unlock" size={10} color="#059669" /> Ouvert</span>
-                                                    }
+                                                    <span style={g.chapGroupName}>{mod.titre}</span>
+                                                    <span style={{ fontSize: '11px', color: '#9CA3AF', fontWeight: 700 }}>{(mod.chapters || []).length} leçon(s)</span>
                                                 </div>
-
-                                                {/* Tasks rows */}
-                                                {(chap.tasks || []).map((task, ti) => {
-                                                    const tc = TASK_CFG[task.type] || TASK_CFG.SLIDE;
-                                                    return (
-                                                        <div key={task.id} style={{ ...g.lessonRow, background: ti % 2 === 0 ? '#fff' : '#FAFAFA' }}>
-                                                            <span style={g.lessonNum}>{ti + 1}</span>
-                                                            <div style={{ flex: 1 }}>
-                                                                <div style={{ fontWeight: '600', fontSize: '13px', color: '#111827' }}>{task.titre}</div>
-                                                                <span style={{ ...g.taskTag, background: tc.bg, color: tc.color }}>
-                                  <Icon name={tc.icon} size={10} color={tc.color} />{tc.lbl}
-                                </span>
-                                                            </div>
-                                                            <div style={{ minWidth: '140px', display: 'flex', justifyContent: 'center' }}>
-                                                                {task.locked
-                                                                    ? (
-                                                                        <span style={{ ...g.statusPill, background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA' }}>
-                                      <Icon name="lock" size={11} color="#DC2626" /> Fermé
-                                    </span>
-                                                                    ) : (
-                                                                        <span style={{ ...g.statusPill, background: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0' }}>
-                                      <Icon name="unlock" size={11} color="#059669" /> Ouvert
-                                    </span>
-                                                                    )
-                                                                }
-                                                            </div>
+                                                {(mod.chapters || []).map((les, li) => (
+                                                    <div key={les.id} style={{ ...g.lessonRow, background: li % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                                                        <span style={g.lessonNum}>{li + 1}</span>
+                                                        <div style={{ flex: 1, fontWeight: 600, fontSize: '13px', color: '#111827' }}>{les.titre}</div>
+                                                        <div style={{ minWidth: '220px', display: 'flex', gap: '4px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                            {les.objectives && <span style={{ ...g.taskTag, background: '#EDE9FE', color: '#7C3AED' }}>Objectifs</span>}
+                                                            {les.studentSlidesUrl && <span style={{ ...g.taskTag, background: '#EDE8FF', color: '#5B2EE8' }}>Slides</span>}
+                                                            {les.imageUrl && <span style={{ ...g.taskTag, background: '#ECFDF5', color: '#059669' }}>Image</span>}
+                                                            {les._count?.quizQuestions > 0 && <span style={{ ...g.taskTag, background: '#FFFBEB', color: '#B45309' }}>Quiz ({les._count.quizQuestions})</span>}
+                                                            {les.challengeContent && <span style={{ ...g.taskTag, background: '#FEF2F2', color: '#DC2626' }}>Challenge</span>}
                                                         </div>
-                                                    );
-                                                })}
-                                                {(chap.tasks || []).length === 0 && (
-                                                    <div style={{ padding: '12px 20px', fontSize: '12px', color: '#D1D5DB', fontStyle: 'italic' }}>
-                                                        Aucune tâche dans ce chapitre
                                                     </div>
+                                                ))}
+                                                {(mod.chapters || []).length === 0 && (
+                                                    <div style={{ padding: '12px 20px', fontSize: '12px', color: '#D1D5DB', fontStyle: 'italic' }}>Aucune leçon dans ce module</div>
                                                 )}
                                             </div>
                                         ))}
-                                        {chaps.length === 0 && (
-                                            <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: '#9CA3AF' }}>Aucun chapitre</div>
+                                        {modules.length === 0 && (
+                                            <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: '#9CA3AF' }}>Aucun module</div>
                                         )}
                                     </div>
                                 )}
@@ -486,7 +494,7 @@ export default function GroupDetail({ groupId, onBack }) {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '380px', overflowY: 'auto', marginTop: '12px' }}>
                             {credEnrollments.map(e => (
                                 <div key={e.id} style={g.credCard}>
-                                    <Av text={`${e.student?.user?.prenom?.[0]||''}${e.student?.user?.nom?.[0]||''}`} size={38} />
+                                    <Avatar user={e.student?.user} size={38} />
                                     <div style={{ flex: 1 }}>
                                         <div style={{ fontWeight: '700', fontSize: '13px', color: '#111827', marginBottom: '4px' }}>
                                             {e.student?.user?.prenom} {e.student?.user?.nom}
@@ -541,7 +549,7 @@ export default function GroupDetail({ groupId, onBack }) {
                         <div style={g.mHead}>
                             <div style={g.mIco}><Icon name="plus" size={20} color="#5B2EE8" /></div>
                             <div>
-                                <h2 style={g.mTitle}>Ajouter un étudiant</h2>
+                                <h2 style={g.mTitle}>Ajouter un élève {A.labelOne.toLowerCase()}</h2>
                                 <p style={g.mSub}>Sera assigné automatiquement au groupe <strong>{group.titre}</strong></p>
                             </div>
                         </div>
@@ -552,7 +560,9 @@ export default function GroupDetail({ groupId, onBack }) {
                                 {[
                                     { lbl: 'Prénom *', k: 'prenom', ph: 'Prénom' },
                                     { lbl: 'Nom *',    k: 'nom',    ph: 'Nom' },
-                                    { lbl: 'Âge',      k: 'age',    ph: 'ex: 10', t: 'number' },
+                                    ...(isKidGroup
+                                        ? [{ lbl: 'Âge', k: 'age', ph: 'ex: 10', t: 'number' }]
+                                        : [{ lbl: 'Email', k: 'email', ph: 'email@exemple.com', t: 'email' }, { lbl: 'Téléphone', k: 'telephone', ph: '06 XX XX XX XX' }]),
                                 ].map(f => (
                                     <div key={f.k} style={g.fg}>
                                         <label style={g.fl}>{f.lbl}</label>
@@ -562,7 +572,7 @@ export default function GroupDetail({ groupId, onBack }) {
                             </div>
                         </div>
 
-                        <div style={g.formSec}>
+                        {isKidGroup && <div style={g.formSec}>
                             <div style={g.formSecTitle}><Icon name="phone" size={12} color="#6B7280" /> Parent / Tuteur</div>
                             <div style={g.fGrid}>
                                 {[
@@ -576,7 +586,7 @@ export default function GroupDetail({ groupId, onBack }) {
                                     </div>
                                 ))}
                             </div>
-                        </div>
+                        </div>}
 
                         <div style={g.mFoot}>
                             <button style={g.btnSec} onClick={() => setShowAdd(false)}>Annuler</button>
@@ -694,4 +704,4 @@ const g = {
     fg:         { display: 'flex', flexDirection: 'column', gap: '4px' },
     fl:         { fontSize: '11px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' },
     fi:         { padding: '9px 12px', border: '1.5px solid #E5E7EB', borderRadius: '8px', fontSize: '13px', color: '#111827', outline: 'none', background: '#fff', fontFamily: 'inherit' },
-};
+};

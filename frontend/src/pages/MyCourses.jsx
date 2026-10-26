@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
+import '../styles/course.css';
 import api from '../api/axios';
-import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
+import { AUDIENCES } from '../utils/audience';
+import LessonResourcesEditor from '../components/course/LessonResourcesEditor';
+import LessonSubmissionsPanel from '../components/course/LessonSubmissionsPanel';
+import QuizImportModal from '../components/course/QuizImportModal';
+import CourseImportModal from '../components/course/CourseImportModal';
+import { formatSize, errMsg } from '../utils/files';
 
 // ── Icons ──────────────────────────────────────────────────
 const Ic = ({ name, size = 16, color = 'currentColor' }) => {
@@ -27,6 +34,11 @@ const Ic = ({ name, size = 16, color = 'currentColor' }) => {
         chevronR:  <svg {...a}><polyline points="9 18 15 12 9 6"/></svg>,
         chevronD:  <svg {...a}><polyline points="6 9 12 15 18 9"/></svg>,
         lock:      <svg {...a}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+        copy:      <svg {...a}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
+        folder:    <svg {...a}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+        clip:      <svg {...a}><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>,
+        inbox:     <svg {...a}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>,
+        upload:    <svg {...a}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
     };
     return icons[name] ? <span style={{ display:'inline-flex', alignItems:'center', flexShrink:0 }}>{icons[name]}</span> : null;
 };
@@ -54,6 +66,8 @@ const Txt = (props) => (
 );
 
 const ELEMENTS = [
+    { key:'files',         label:'Fichiers',   icon:'clip',    color:'#4338CA', bg:'#EEF2FF' },
+    { key:'homework',      label:'Devoir',     icon:'inbox',   color:'#BE123C', bg:'#FFF1F2' },
     { key:'objectives',    label:'Objectifs',  icon:'target',  color:'#7C3AED', bg:'#EDE9FE' },
     { key:'teacherGuide',  label:'Guide Prof', icon:'teacher', color:'#0369A1', bg:'#E0F2FE' },
     { key:'studentSlides', label:'Slides',     icon:'slide',   color:'#6C47FF', bg:'#EEE9FF' },
@@ -63,6 +77,8 @@ const ELEMENTS = [
 ];
 
 const hasElement = (lesson, key) => {
+    if (key === 'files')         return (lesson.resources||[]).length > 0;
+    if (key === 'homework')      return !!lesson.homeworkEnabled;
     if (key === 'objectives')    return !!lesson.objectives;
     if (key === 'teacherGuide')  return !!lesson.teacherGuideUrl;
     if (key === 'studentSlides') return !!lesson.studentSlidesUrl;
@@ -71,6 +87,33 @@ const hasElement = (lesson, key) => {
     if (key === 'quiz')          return (lesson.quizQuestions||[]).length > 0;
     return false;
 };
+const elementLabel = (lesson, el) => {
+    if (el.key === 'files') {
+        const n = (lesson.resources||[]).length;
+        return `${n} fichier${n>1?'s':''}`;
+    }
+    if (el.key === 'quiz') {
+        const n = (lesson.quizQuestions||[]).length;
+        return `Quiz · ${n}`;
+    }
+    return el.label;
+};
+
+const EMPTY_LESSON = { titre:'', objectives:'', teacherGuideUrl:'', studentSlidesUrl:'', imageUrl:'', challengeContent:'', challengeLang:'python', homeworkEnabled:false, homeworkInstructions:'', homeworkDueDate:'' };
+const lessonToForm = (l) => ({
+    titre:l.titre||'', objectives:l.objectives||'', teacherGuideUrl:l.teacherGuideUrl||'', studentSlidesUrl:l.studentSlidesUrl||'',
+    imageUrl:l.imageUrl||'', challengeContent:l.challengeContent||'', challengeLang:l.challengeLang||'python',
+    homeworkEnabled:!!l.homeworkEnabled, homeworkInstructions:l.homeworkInstructions||'',
+    homeworkDueDate:l.homeworkDueDate ? String(l.homeworkDueDate).slice(0,10) : '',
+});
+
+// Interrupteur
+const Switch = ({ on, onChange, label }) => (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
+            style={{ width:'42px', height:'24px', borderRadius:'50px', border:'none', background:on?'#BE123C':'#D1D5DB', position:'relative', cursor:'pointer', flexShrink:0, transition:'background .15s', padding:0 }}>
+        <span style={{ position:'absolute', top:'3px', left:on?'21px':'3px', width:'18px', height:'18px', borderRadius:'50%', background:'#fff', transition:'left .15s', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}/>
+    </button>
+);
 
 // GroupSelector — hors composant
 const GroupSelector = ({ selectedIds, onChange, groups }) => (
@@ -95,9 +138,9 @@ const GroupSelector = ({ selectedIds, onChange, groups }) => (
 // ════════════════════════════════════════════════════════════
 // COMPOSANT PRINCIPAL
 // ════════════════════════════════════════════════════════════
-export default function MyCourses() {
-    const { user }  = useAuth();
-    const isAdmin   = user?.role === 'ADMIN';
+export default function MyCourses({ audience = 'ENFANT' }) {
+    const A = AUDIENCES[audience];
+    const other = AUDIENCES[audience === 'ENFANT' ? 'ADULTE' : 'ENFANT'];
 
     const [courses,  setCourses]  = useState([]);
     const [groups,   setGroups]   = useState([]);
@@ -119,14 +162,18 @@ export default function MyCourses() {
     const [editingCourse,   setEditingCourse]   = useState(null);
     const [editingModule,   setEditingModule]   = useState(null);
     const [editingQuestion, setEditingQuestion] = useState(null);
+    const [importTarget,    setImportTarget]    = useState(null);  // { course } | {} (nouveau cours)
+    const [showQuizImport,  setShowQuizImport]  = useState(false);
+    const [storage,         setStorage]         = useState(null);
+    const [showMore,        setShowMore]        = useState(false);
 
-    const emptyCourse = { titre:'', description:'', niveau:'', coverImage:'', groupIds:[] };
+    const emptyCourse = { titre:'', description:'', niveau:'', coverImage:'', groupIds:[], audience };
     const [courseForm, setCourseForm] = useState(emptyCourse);
     const [moduleForm, setModuleForm] = useState({ titre:'', description:'' });
-    const [lessonForm, setLessonForm] = useState({ titre:'', objectives:'', teacherGuideUrl:'', studentSlidesUrl:'', imageUrl:'', challengeContent:'', challengeLang:'python' });
+    const [lessonForm, setLessonForm] = useState(EMPTY_LESSON);
     const [quizForm,   setQuizForm]   = useState({ question:'', options:['','','',''], correct:0 });
 
-    useEffect(() => { fetchAll(); }, []);
+    useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Fermer menu au clic extérieur
     useEffect(() => {
@@ -140,11 +187,12 @@ export default function MyCourses() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [cRes, gRes] = await Promise.all([api.get('/courses'), api.get('/groups')]);
+            const [cRes, gRes] = await Promise.all([api.get(`/courses?audience=${audience}`), api.get('/groups')]);
             setCourses(cRes.data);
             setGroups(gRes.data);
         } catch (err) { console.error(err); }
         setLoading(false);
+        api.get('/content/storage').then(r => setStorage(r.data)).catch(() => {});
     };
 
     const fetchModules = async (courseId) => {
@@ -180,7 +228,8 @@ export default function MyCourses() {
         try {
             const r = await api.get(`/lessons/lessons/${lesson.id}`);
             setSelLesson(r.data);
-            setLessonForm({ titre:r.data.titre||'', objectives:r.data.objectives||'', teacherGuideUrl:r.data.teacherGuideUrl||'', studentSlidesUrl:r.data.studentSlidesUrl||'', imageUrl:r.data.imageUrl||'', challengeContent:r.data.challengeContent||'', challengeLang:r.data.challengeLang||'python' });
+            setLessonForm(lessonToForm(r.data));
+            setShowMore(!!(r.data.teacherGuideUrl || r.data.studentSlidesUrl || r.data.imageUrl || r.data.challengeContent));
             setView('lesson-edit');
         } catch { showToast('Erreur chargement leçon','error'); }
     };
@@ -194,13 +243,33 @@ export default function MyCourses() {
             else { await api.post('/courses', courseForm); showToast('Cours créé'); }
             setShowCourseModal(false); setEditingCourse(null); setCourseForm(emptyCourse);
             fetchAll();
-        } catch { showToast('Erreur','error'); }
+        } catch (err) { showToast(err.response?.data?.message || 'Erreur','error'); }
         setSaving(false);
     };
     const confirmDeleteCourse = async () => {
         if (!showDeleteModal) return;
         try { await api.delete(`/courses/${showDeleteModal.id}`); fetchAll(); showToast('Cours supprimé'); setShowDeleteModal(null); }
         catch { showToast('Erreur suppression','error'); }
+    };
+
+    const duplicateCourse = async (c) => {
+        try {
+            const r = await api.post(`/courses/${c.id}/duplicate`, {});
+            showToast(`Copie créée : « ${r.data.titre} »`);
+            fetchAll();
+        } catch (err) { showToast(errMsg(err),'error'); }
+    };
+
+    // Fin d'un import de dossier
+    const onImportDone = async (courseId, open) => {
+        const target = importTarget?.course;
+        setImportTarget(null);
+        await fetchAll();
+        if (open && courseId) {
+            if (target && selCourse?.id === target.id) { await refreshCourse(); setView('modules'); return; }
+            const cRes = await api.get(`/courses/${courseId}`).catch(() => null);
+            if (cRes) await openCourse(cRes.data);
+        } else if (target) await refreshCourse();
     };
 
     // CRUD MODULES
@@ -230,15 +299,19 @@ export default function MyCourses() {
                 await api.put(`/lessons/lessons/${selLesson.id}`, lessonForm);
                 const r = await api.get(`/lessons/lessons/${selLesson.id}`);
                 setSelLesson(r.data);
+                setLessonForm(lessonToForm(r.data));
                 showToast('Leçon sauvegardée');
+                if (selModule) { const lessons = await fetchLessons(selModule.id); setSelModule(m => ({...m, chapters:lessons})); }
             } else {
-                await api.post(`/lessons/modules/${selModule.id}/lessons`, {...lessonForm, courseId:selCourse.id});
-                showToast('Leçon créée');
+                const r = await api.post(`/lessons/modules/${selModule.id}/lessons`, {...lessonForm, courseId:selCourse.id});
+                showToast('Leçon créée — ajoutez son contenu');
                 setShowLessonModal(false);
-                setLessonForm({titre:'',objectives:'',teacherGuideUrl:'',studentSlidesUrl:'',imageUrl:'',challengeContent:'',challengeLang:'python'});
+                setLessonForm(EMPTY_LESSON);
+                const lessons = await fetchLessons(selModule.id);
+                setSelModule(m => ({...m, chapters:lessons}));
+                await openLesson(r.data);
             }
-            if (selModule) await openModule(selModule);
-        } catch { showToast('Erreur','error'); }
+        } catch (err) { showToast(errMsg(err),'error'); }
         setSaving(false);
     };
     const deleteLesson = async (id) => {
@@ -281,17 +354,40 @@ export default function MyCourses() {
                     {/* Header */}
                     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'28px' }}>
                         <div>
-                            <h1 style={{ fontFamily:'sans-serif', fontSize:'24px', fontWeight:'800', color:'#1A1040', margin:0 }}>
-                                {isAdmin ? 'Tous les cours' : 'Mes cours'}
+                            <div style={{ fontSize:'11px', fontWeight:'800', letterSpacing:'1.2px', textTransform:'uppercase', color:A.color }}>Espace {A.label}</div>
+                            <h1 style={{ fontFamily:'sans-serif', fontSize:'24px', fontWeight:'800', color:'#1A1040', margin:'2px 0 0' }}>
+                                Cours {A.label.toLowerCase()}
                             </h1>
-                            <p style={{ fontSize:'14px', color:'#9CA3AF', margin:'4px 0 0', fontWeight:'500' }}>
-                                {courses.length} cours disponible{courses.length>1?'s':''}
+                            <p style={{ fontSize:'13px', color:'#9CA3AF', margin:'4px 0 0', fontWeight:'500' }}>
+                                {courses.length} cours · {A.examples}
                             </p>
                         </div>
-                        <button style={s.btnPrimary} onClick={() => { setCourseForm(emptyCourse); setEditingCourse(null); setShowCourseModal(true); }}>
-                            <Ic name="plus" size={16} color="#fff"/> Nouveau cours
-                        </button>
+                        <div style={{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
+                            <Link to={`/courses/${other.slug}`} style={{ fontSize:'12px', fontWeight:'700', color:'#6B7280', textDecoration:'none' }}>Voir les cours {other.label.toLowerCase()} →</Link>
+                            <button style={s.btnOutline} onClick={() => setImportTarget({})} title="Créer un cours à partir d'un dossier du PC ou d'un ZIP Google Drive">
+                                <Ic name="folder" size={15} color="#6C47FF"/> Importer un dossier
+                            </button>
+                            <button style={{ ...s.btnPrimary, background:A.gradient }} onClick={() => { setCourseForm(emptyCourse); setEditingCourse(null); setShowCourseModal(true); }}>
+                                <Ic name="plus" size={16} color="#fff"/> Nouveau cours {A.label.toLowerCase()}
+                            </button>
+                        </div>
                     </div>
+
+                    {storage && !storage.configured && (
+                        <div style={{ background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:'12px', padding:'12px 16px', fontSize:'13px', color:'#92400E', marginBottom:'18px', lineHeight:1.5 }}>
+                            ⚠️ Le stockage des fichiers n'est pas encore configuré sur le serveur (variables <code>SUPABASE_URL</code> et <code>SUPABASE_SERVICE_ROLE_KEY</code>). Les liens Drive/YouTube et les quiz fonctionnent, mais l'envoi de fichiers sera refusé.
+                        </div>
+                    )}
+                    {storage?.configured && (
+                        <div style={{ display:'flex', alignItems:'center', gap:'10px', fontSize:'12px', color:'#6B7280', marginBottom:'18px', flexWrap:'wrap' }}>
+                            <span style={{ fontWeight:'700' }}>Stockage des fichiers</span>
+                            <div style={{ width:'160px', height:'6px', background:'#EDE8FF', borderRadius:'50px', overflow:'hidden' }}>
+                                <div style={{ width:`${Math.min(100, storage.usedBytes/storage.quotaBytes*100)}%`, height:'100%', background: storage.usedBytes/storage.quotaBytes > 0.85 ? '#DC2626' : '#6C47FF' }}/>
+                            </div>
+                            <span>{formatSize(storage.usedBytes)} / {formatSize(storage.quotaBytes)}</span>
+                            {storage.usedBytes/storage.quotaBytes > 0.85 && <span style={{ color:'#DC2626', fontWeight:'700' }}>Presque plein : privilégiez les liens Google Drive pour les vidéos.</span>}
+                        </div>
+                    )}
 
                     {loading ? (
                         <div style={s.emptyState}>
@@ -302,7 +398,7 @@ export default function MyCourses() {
                             <div style={{ width:'80px', height:'80px', background:'#EDE8FF', borderRadius:'24px', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:'16px' }}>
                                 <Ic name="book" size={36} color="#6C47FF"/>
                             </div>
-                            <div style={{ fontSize:'18px', fontWeight:'700', color:'#1A1040', marginBottom:'6px' }}>Aucun cours</div>
+                            <div style={{ fontSize:'18px', fontWeight:'700', color:'#1A1040', marginBottom:'6px' }}>Aucun cours {A.label.toLowerCase()}</div>
                             <div style={{ fontSize:'14px', color:'#9CA3AF', marginBottom:'20px' }}>Créez votre premier cours pour commencer</div>
                             <button style={s.btnPrimary} onClick={() => { setCourseForm(emptyCourse); setEditingCourse(null); setShowCourseModal(true); }}>
                                 <Ic name="plus" size={14} color="#fff"/> Créer un cours
@@ -340,8 +436,11 @@ export default function MyCourses() {
                                                 </button>
                                                 {menuOpen===c.id && (
                                                     <div style={{ position:'absolute', top:'38px', right:0, background:'#fff', border:'1px solid #EBEBF5', borderRadius:'12px', padding:'6px', boxShadow:'0 8px 32px rgba(0,0,0,0.12)', minWidth:'160px', zIndex:50 }}>
-                                                        <button style={s.menuItem} onClick={() => { setCourseForm({titre:c.titre,description:c.description||'',niveau:c.niveau||'',coverImage:c.coverImage||'',groupIds:c.courseGroups?.map(cg=>cg.groupId)||[]}); setEditingCourse(c); setShowCourseModal(true); setMenuOpen(null); }}>
+                                                        <button style={s.menuItem} onClick={() => { setCourseForm({titre:c.titre,description:c.description||'',niveau:c.niveau||'',coverImage:c.coverImage||'',groupIds:c.courseGroups?.map(cg=>cg.groupId)||[],audience:c.audience||audience}); setEditingCourse(c); setShowCourseModal(true); setMenuOpen(null); }}>
                                                             <Ic name="edit" size={14} color="#6C47FF"/> Modifier le cours
+                                                        </button>
+                                                        <button style={s.menuItem} onClick={() => { duplicateCourse(c); setMenuOpen(null); }}>
+                                                            <Ic name="copy" size={14} color="#6C47FF"/> Dupliquer
                                                         </button>
                                                         <div style={{ height:'1px', background:'#F3F4F6', margin:'4px 0' }}/>
                                                         <button style={{ ...s.menuItem, color:'#DC2626' }} onClick={() => { setShowDeleteModal(c); setMenuOpen(null); }}>
@@ -402,9 +501,14 @@ export default function MyCourses() {
                             <h1 style={{ fontFamily:'sans-serif', fontSize:'22px', fontWeight:'800', color:'#1A1040', margin:'0 0 4px' }}>{selCourse?.titre}</h1>
                             {selCourse?.niveau && <span style={{ fontSize:'12px', fontWeight:'600', color:'#6C47FF', background:'#F0EEFF', padding:'3px 10px', borderRadius:'50px' }}>{selCourse.niveau}</span>}
                         </div>
-                        <button style={s.btnPrimary} onClick={() => { setModuleForm({titre:'',description:''}); setEditingModule(null); setShowModuleModal(true); }}>
-                            <Ic name="plus" size={14} color="#fff"/> Ajouter un module
-                        </button>
+                        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                            <button style={s.btnOutline} onClick={() => setImportTarget({ course:selCourse })} title="Ajouter des modules et leçons depuis un dossier ou un ZIP">
+                                <Ic name="folder" size={14} color="#6C47FF"/> Importer un dossier
+                            </button>
+                            <button style={s.btnPrimary} onClick={() => { setModuleForm({titre:'',description:''}); setEditingModule(null); setShowModuleModal(true); }}>
+                                <Ic name="plus" size={14} color="#fff"/> Ajouter un module
+                            </button>
+                        </div>
                     </div>
 
                     {(selCourse?.modules||[]).length===0 ? (
@@ -471,7 +575,7 @@ export default function MyCourses() {
                             <h1 style={{ fontFamily:'sans-serif', fontSize:'22px', fontWeight:'800', color:'#1A1040', margin:'0 0 4px' }}>{selModule?.titre}</h1>
                             {selModule?.description && <div style={{ fontSize:'14px', color:'#9CA3AF' }}>{selModule.description}</div>}
                         </div>
-                        <button style={s.btnPrimary} onClick={() => { setLessonForm({titre:'',objectives:'',teacherGuideUrl:'',studentSlidesUrl:'',imageUrl:'',challengeContent:'',challengeLang:'python'}); setShowLessonModal(true); }}>
+                        <button style={s.btnPrimary} onClick={() => { setLessonForm(EMPTY_LESSON); setShowLessonModal(true); }}>
                             <Ic name="plus" size={14} color="#fff"/> Nouvelle leçon
                         </button>
                     </div>
@@ -503,7 +607,7 @@ export default function MyCourses() {
                                                     const has = hasElement(lesson, el.key);
                                                     return has ? (
                                                         <span key={el.key} style={{ display:'inline-flex', alignItems:'center', gap:'3px', padding:'2px 7px', borderRadius:'5px', fontSize:'10px', fontWeight:'700', background:el.bg, color:el.color }}>
-                                                            <Ic name={el.icon} size={9} color={el.color}/> {el.label}
+                                                            <Ic name={el.icon} size={9} color={el.color}/> {elementLabel(lesson, el)}
                                                         </span>
                                                     ) : null;
                                                 })}
@@ -512,6 +616,7 @@ export default function MyCourses() {
                                         </div>
                                         {/* Actions */}
                                         <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
+                                            {lesson.locked && <span title="Leçon verrouillée" style={{ display:'inline-flex' }}><Ic name="lock" size={13} color="#9CA3AF"/></span>}
                                             <button style={{ ...s.iconBtnLight, background:'#FEF2F2', border:'1px solid #FECACA' }} title="Supprimer" onClick={() => deleteLesson(lesson.id)}>
                                                 <Ic name="trash" size={13} color="#DC2626"/>
                                             </button>
@@ -549,12 +654,26 @@ export default function MyCourses() {
                         </button>
                     </div>
 
-                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px' }}>
+                    <div style={{ fontSize:'12px', color:'#6B7280', margin:'-12px 0 18px', lineHeight:1.5 }}>
+                        Tout est facultatif : ne remplissez que ce dont cette leçon a besoin. Les fichiers sont enregistrés tout de suite ; le reste avec « Sauvegarder ».
+                    </div>
+
+                    <div className="ch-stack-sm" style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:'16px' }}>
 
                         {/* Titre */}
                         <div style={{ ...s.card, gridColumn:'1/-1' }}>
                             <div style={s.cardHeader}><Ic name="file" size={14} color="#6C47FF"/> Titre de la leçon</div>
-                            <Inp value={lessonForm.titre} onChange={e=>setLessonForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Leçon 1 — Introduction à Python"/>
+                            <Inp value={lessonForm.titre} onChange={e=>setLessonForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Séance 1 — Découverte de Scratch"/>
+                        </div>
+
+                        {/* Fichiers et liens */}
+                        <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#DDD5FF' }}>
+                            <LessonResourcesEditor
+                                lessonId={selLesson.id}
+                                resources={selLesson.resources || []}
+                                notify={showToast}
+                                onChanged={(data) => { if (data) setSelLesson(prev => ({ ...prev, resources:data.resources })); }}
+                            />
                         </div>
 
                         {/* Objectifs */}
@@ -563,61 +682,49 @@ export default function MyCourses() {
                             <Txt value={lessonForm.objectives} onChange={e=>setLessonForm(f=>({...f,objectives:e.target.value}))} placeholder="À la fin de cette leçon, l'élève saura..."/>
                         </div>
 
-                        {/* Image */}
-                        <div style={s.card}>
-                            <div style={s.cardHeader}><Ic name="image" size={14} color="#059669"/> Image illustrative <span style={s.optTag}>optionnel</span></div>
-                            <Inp value={lessonForm.imageUrl} onChange={e=>setLessonForm(f=>({...f,imageUrl:e.target.value}))} placeholder="https://..."/>
-                            {lessonForm.imageUrl && (
-                                <div style={{ marginTop:'10px', borderRadius:'8px', overflow:'hidden', border:'1px solid #E5E7EB', height:'100px' }}>
-                                    <img src={lessonForm.imageUrl} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>e.target.style.display='none'}/>
+                        {/* Devoir à rendre */}
+                        <div style={{ ...s.card, borderColor: lessonForm.homeworkEnabled ? '#FECDD3' : '#EBEBF5', background: lessonForm.homeworkEnabled ? '#FFF8F9' : '#fff' }}>
+                            <div style={{ ...s.cardHeader, marginBottom: lessonForm.homeworkEnabled ? '12px' : '6px' }}>
+                                <Ic name="inbox" size={14} color="#BE123C"/> Devoir à rendre
+                                <span style={{ marginLeft:'auto' }}><Switch on={lessonForm.homeworkEnabled} label="Activer le devoir à rendre" onChange={v=>setLessonForm(f=>({...f,homeworkEnabled:v}))}/></span>
+                            </div>
+                            {!lessonForm.homeworkEnabled ? (
+                                <div style={{ fontSize:'12px', color:'#9CA3AF', lineHeight:1.5 }}>Activez-le si les élèves doivent déposer un fichier (ZIP, projet Scratch, document…) ou un lien.</div>
+                            ) : (
+                                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                                    <Txt value={lessonForm.homeworkInstructions} onChange={e=>setLessonForm(f=>({...f,homeworkInstructions:e.target.value}))} placeholder="Consignes : ex. Rends ton projet Scratch (.sb3) ou un ZIP de ton dossier." style={{ minHeight:'70px' }}/>
+                                    <label style={{ display:'flex', alignItems:'center', gap:'8px', fontSize:'13px', color:'#374151', fontWeight:'600' }}>
+                                        Date limite
+                                        <Inp type="date" value={lessonForm.homeworkDueDate} onChange={e=>setLessonForm(f=>({...f,homeworkDueDate:e.target.value}))} style={{ width:'auto', padding:'7px 10px' }}/>
+                                        <span style={{ fontSize:'11px', color:'#9CA3AF', fontWeight:'500' }}>facultative</span>
+                                    </label>
                                 </div>
                             )}
                         </div>
 
-                        {/* Teacher Guide */}
-                        <div style={{ ...s.card, borderColor:'#BAE6FD', background:'#F0F9FF' }}>
-                            <div style={s.cardHeader}>
-                                <Ic name="teacher" size={14} color="#0369A1"/> Guide Professeur
-                                <span style={{ fontSize:'10px', fontWeight:'800', color:'#0369A1', background:'#DBEAFE', padding:'2px 7px', borderRadius:'4px' }}>🔒 Prof uniquement</span>
-                                <span style={s.optTag}>optionnel</span>
-                            </div>
-                            <Inp value={lessonForm.teacherGuideUrl} onChange={e=>setLessonForm(f=>({...f,teacherGuideUrl:e.target.value}))} placeholder="https://docs.google.com/presentation/..." style={{ borderColor:'#BAE6FD' }}/>
-                        </div>
-
-                        {/* Student Slides */}
-                        <div style={{ ...s.card, borderColor:'#DDD5FF', background:'#F8F6FF' }}>
-                            <div style={s.cardHeader}><Ic name="slide" size={14} color="#6C47FF"/> Slides Élèves <span style={s.optTag}>optionnel</span></div>
-                            <Inp value={lessonForm.studentSlidesUrl} onChange={e=>setLessonForm(f=>({...f,studentSlidesUrl:e.target.value}))} placeholder="https://docs.google.com/presentation/..." style={{ borderColor:'#DDD5FF' }}/>
-                        </div>
-
-                        {/* Challenge */}
-                        <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#FECACA', background:'#FFF5F5' }}>
-                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'12px' }}>
-                                <div style={s.cardHeader}><Ic name="code" size={14} color="#DC2626"/> Challenge / Script <span style={s.optTag}>optionnel</span></div>
-                                <select style={{ padding:'7px 12px', border:'1.5px solid #FECACA', borderRadius:'8px', fontSize:'13px', color:'#374151', outline:'none', background:'#fff', fontFamily:'inherit', cursor:'pointer' }} value={lessonForm.challengeLang} onChange={e=>setLessonForm(f=>({...f,challengeLang:e.target.value}))}>
-                                    {['python','javascript','html','css','scratch'].map(l=><option key={l} value={l}>{l.charAt(0).toUpperCase()+l.slice(1)}</option>)}
-                                </select>
-                            </div>
-                            <Txt value={lessonForm.challengeContent} onChange={e=>setLessonForm(f=>({...f,challengeContent:e.target.value}))} placeholder="# Écris ton code ici..." style={{ fontFamily:'"Fira Code",monospace', fontSize:'13px', minHeight:'140px', background:'#0F172A', color:'#E2E8F0', border:'1px solid #334155', borderRadius:'10px' }}/>
-                        </div>
-
                         {/* Quiz */}
                         <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#FDE68A', background:'#FFFDF0' }}>
-                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
-                                <div style={s.cardHeader}>
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px', gap:'10px', flexWrap:'wrap' }}>
+                                <div style={{ ...s.cardHeader, marginBottom:0 }}>
                                     <Ic name="qcm" size={14} color="#B45309"/> Quiz
                                     <span style={{ fontSize:'12px', color:'#9CA3AF', fontWeight:'500' }}>({(selLesson.quizQuestions||[]).length} question{(selLesson.quizQuestions||[]).length!==1?'s':''})</span>
                                     <span style={s.optTag}>optionnel</span>
                                 </div>
-                                <button style={{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'#fff', border:'1.5px solid #FDE68A', borderRadius:'9px', color:'#B45309', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' }}
-                                        onClick={() => { setQuizForm({question:'',options:['','','',''],correct:0}); setEditingQuestion(null); setShowQuizModal(true); }}>
-                                    <Ic name="plus" size={13} color="#B45309"/> Ajouter une question
-                                </button>
+                                <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                                    <button style={{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'#fff', border:'1.5px solid #FDE68A', borderRadius:'9px', color:'#B45309', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' }}
+                                            onClick={() => setShowQuizImport(true)} title="Importer des questions depuis Excel ou CSV">
+                                        <Ic name="upload" size={13} color="#B45309"/> Importer (Excel / CSV)
+                                    </button>
+                                    <button style={{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'#fff', border:'1.5px solid #FDE68A', borderRadius:'9px', color:'#B45309', fontWeight:'700', fontSize:'13px', cursor:'pointer', fontFamily:'inherit' }}
+                                            onClick={() => { setQuizForm({question:'',options:['','','',''],correct:0}); setEditingQuestion(null); setShowQuizModal(true); }}>
+                                        <Ic name="plus" size={13} color="#B45309"/> Ajouter une question
+                                    </button>
+                                </div>
                             </div>
 
                             {(selLesson.quizQuestions||[]).length===0 ? (
                                 <div style={{ textAlign:'center', padding:'28px', color:'#D1D5DB', fontSize:'14px' }}>
-                                    Aucune question pour l'instant — cliquez sur "Ajouter une question"
+                                    Pas de quiz pour cette leçon — ajoutez des questions une par une ou importez un fichier Excel
                                 </div>
                             ) : (
                                 <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
@@ -629,7 +736,7 @@ export default function MyCourses() {
                                                         <span style={{ background:'#FEF3C7', color:'#92400E', fontWeight:'800', fontSize:'11px', padding:'2px 8px', borderRadius:'5px', marginRight:'8px' }}>Q{qi+1}</span>
                                                         {q.question}
                                                     </div>
-                                                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}>
+                                                    <div className="ch-stack-sm" style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:'6px' }}>
                                                         {q.options.map((opt,oi) => (
                                                             <div key={oi} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', borderRadius:'8px', background:oi===q.correct?'#ECFDF5':'#F9FAFB', border:`1.5px solid ${oi===q.correct?'#6EE7B7':'#E5E7EB'}` }}>
                                                                 <span style={{ width:'20px', height:'20px', borderRadius:'5px', background:oi===q.correct?'#059669':'#E5E7EB', color:oi===q.correct?'#fff':'#6B7280', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'800', flexShrink:0 }}>{['A','B','C','D'][oi]}</span>
@@ -653,6 +760,61 @@ export default function MyCourses() {
                                 </div>
                             )}
                         </div>
+
+                        {/* Rendus des élèves */}
+                        {selLesson.homeworkEnabled && (
+                            <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#FECDD3' }}>
+                                <div style={s.cardHeader}><Ic name="inbox" size={14} color="#BE123C"/> Devoirs rendus</div>
+                                <LessonSubmissionsPanel lesson={selLesson} notify={showToast}/>
+                            </div>
+                        )}
+
+                        {/* Autres contenus */}
+                        <div style={{ gridColumn:'1/-1' }}>
+                            <button type="button" onClick={() => setShowMore(v => !v)} style={{ ...s.btnOutline, border:'1.5px dashed #DDD5FF', background:'transparent' }}>
+                                <Ic name={showMore ? 'chevronD' : 'chevronR'} size={13} color="#6C47FF"/> Autres contenus : image, liens guide / slides, code
+                            </button>
+                        </div>
+                        {showMore && (<>
+                        {/* Image */}
+                        <div style={s.card}>
+                            <div style={s.cardHeader}><Ic name="image" size={14} color="#059669"/> Image illustrative <span style={s.optTag}>optionnel</span></div>
+                            <Inp value={lessonForm.imageUrl} onChange={e=>setLessonForm(f=>({...f,imageUrl:e.target.value}))} placeholder="https://..."/>
+                            {lessonForm.imageUrl && (
+                                <div style={{ marginTop:'10px', borderRadius:'8px', overflow:'hidden', border:'1px solid #E5E7EB', height:'100px' }}>
+                                    <img src={lessonForm.imageUrl} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>e.target.style.display='none'}/>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Teacher Guide */}
+                        <div style={{ ...s.card, borderColor:'#BAE6FD', background:'#F0F9FF' }}>
+                            <div style={s.cardHeader}>
+                                <Ic name="teacher" size={14} color="#0369A1"/> Guide professeur (lien)
+                                <span style={{ fontSize:'10px', fontWeight:'800', color:'#0369A1', background:'#DBEAFE', padding:'2px 7px', borderRadius:'4px' }}>🔒 Prof uniquement</span>
+                                <span style={s.optTag}>optionnel</span>
+                            </div>
+                            <Inp value={lessonForm.teacherGuideUrl} onChange={e=>setLessonForm(f=>({...f,teacherGuideUrl:e.target.value}))} placeholder="https://docs.google.com/presentation/..." style={{ borderColor:'#BAE6FD' }}/>
+                        </div>
+
+                        {/* Student Slides */}
+                        <div style={{ ...s.card, borderColor:'#DDD5FF', background:'#F8F6FF' }}>
+                            <div style={s.cardHeader}><Ic name="slide" size={14} color="#6C47FF"/> Slides élèves (lien) <span style={s.optTag}>optionnel</span></div>
+                            <Inp value={lessonForm.studentSlidesUrl} onChange={e=>setLessonForm(f=>({...f,studentSlidesUrl:e.target.value}))} placeholder="https://docs.google.com/presentation/..." style={{ borderColor:'#DDD5FF' }}/>
+                        </div>
+
+                        {/* Challenge */}
+                        <div style={{ ...s.card, gridColumn:'1/-1', borderColor:'#FECACA', background:'#FFF5F5' }}>
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'12px', gap:'10px' }}>
+                                <div style={{ ...s.cardHeader, marginBottom:0 }}><Ic name="code" size={14} color="#DC2626"/> Code / challenge (texte) <span style={s.optTag}>optionnel</span></div>
+                                <select style={{ padding:'7px 12px', border:'1.5px solid #FECACA', borderRadius:'8px', fontSize:'13px', color:'#374151', outline:'none', background:'#fff', fontFamily:'inherit', cursor:'pointer' }} value={lessonForm.challengeLang} onChange={e=>setLessonForm(f=>({...f,challengeLang:e.target.value}))}>
+                                    {['python','javascript','html','css','scratch'].map(l=><option key={l} value={l}>{l.charAt(0).toUpperCase()+l.slice(1)}</option>)}
+                                </select>
+                            </div>
+                            <Txt value={lessonForm.challengeContent} onChange={e=>setLessonForm(f=>({...f,challengeContent:e.target.value}))} placeholder="# Écris ton code ici..." style={{ fontFamily:'"Fira Code",monospace', fontSize:'13px', minHeight:'140px', background:'#0F172A', color:'#E2E8F0', border:'1px solid #334155', borderRadius:'10px' }}/>
+                        </div>
+
+                        </>)}
                     </div>
                 </div>
             )}
@@ -682,10 +844,23 @@ export default function MyCourses() {
             {showCourseModal && (
                 <div style={s.overlay} onClick={() => setShowCourseModal(false)}>
                     <div style={s.modal} onClick={e=>e.stopPropagation()}>
-                        <h2 style={s.modalTitle}>{editingCourse ? 'Modifier le cours' : 'Nouveau cours'}</h2>
+                        <h2 style={s.modalTitle}>{editingCourse ? 'Modifier le cours' : `Nouveau cours ${AUDIENCES[courseForm.audience]?.label.toLowerCase() || ''}`}</h2>
                         <div style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
+                            <div style={s.formGroup}>
+                                <label style={s.lbl}>Public</label>
+                                <div style={{ display:'flex', gap:'8px' }}>
+                                    {Object.values(AUDIENCES).map(a => (
+                                        <button key={a.key} type="button"
+                                                onClick={() => setCourseForm(f => ({ ...f, audience:a.key, groupIds: f.audience === a.key ? f.groupIds : [] }))}
+                                                style={{ flex:1, padding:'9px', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontWeight:'800', fontSize:'13px',
+                                                         border:`2px solid ${courseForm.audience === a.key ? a.color : '#E5E7EB'}`, background: courseForm.audience === a.key ? a.bg : '#fff', color: courseForm.audience === a.key ? a.color : '#6B7280' }}>
+                                            {a.icon} {a.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                             <div style={s.formGroup}><label style={s.lbl}>Titre *</label><Inp value={courseForm.titre} onChange={e=>setCourseForm(f=>({...f,titre:e.target.value}))} placeholder="ex: Minecraft Game Design"/></div>
-                            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                            <div className="ch-stack-sm" style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:'12px' }}>
                                 <div style={s.formGroup}><label style={s.lbl}>Niveau</label><Inp value={courseForm.niveau} onChange={e=>setCourseForm(f=>({...f,niveau:e.target.value}))} placeholder="ex: 8-12 ans, Débutant"/></div>
                                 <div style={s.formGroup}><label style={s.lbl}>Description</label><Inp value={courseForm.description} onChange={e=>setCourseForm(f=>({...f,description:e.target.value}))} placeholder="Brève description..."/></div>
                             </div>
@@ -700,7 +875,8 @@ export default function MyCourses() {
                             </div>
                             <div style={s.formGroup}>
                                 <label style={s.lbl}>Groupes assignés</label>
-                                <GroupSelector selectedIds={courseForm.groupIds} onChange={ids=>setCourseForm(f=>({...f,groupIds:ids}))} groups={groups}/>
+                                <GroupSelector selectedIds={courseForm.groupIds} onChange={ids=>setCourseForm(f=>({...f,groupIds:ids}))} groups={groups.filter(g => g.audience === courseForm.audience)}/>
+                                <div style={{ fontSize:'11px', color:'#9CA3AF' }}>Seuls les groupes {AUDIENCES[courseForm.audience]?.label.toLowerCase()} sont proposés : les élèves de ces groupes verront ce cours.</div>
                                 {courseForm.groupIds.length>0 && <div style={{ fontSize:'12px', color:'#059669', fontWeight:'600', marginTop:'4px' }}>✅ {courseForm.groupIds.length} groupe{courseForm.groupIds.length>1?'s':''} sélectionné{courseForm.groupIds.length>1?'s':''}</div>}
                             </div>
                         </div>
@@ -742,6 +918,29 @@ export default function MyCourses() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ════ IMPORT QUIZ ════ */}
+            {showQuizImport && selLesson && (
+                <QuizImportModal
+                    lessonId={selLesson.id}
+                    existingCount={(selLesson.quizQuestions||[]).length}
+                    notify={showToast}
+                    onClose={() => setShowQuizImport(false)}
+                    onImported={(questions) => { setShowQuizImport(false); setSelLesson(prev => ({ ...prev, quizQuestions:questions })); }}
+                />
+            )}
+
+            {/* ════ IMPORT DOSSIER / ZIP ════ */}
+            {importTarget && (
+                <CourseImportModal
+                    audience={audience}
+                    courses={courses}
+                    targetCourse={importTarget.course}
+                    notify={showToast}
+                    onClose={() => setImportTarget(null)}
+                    onDone={onImportDone}
+                />
             )}
 
             {/* ════ MODAL QUIZ ════ */}
@@ -797,4 +996,4 @@ const s = {
     formGroup:   { display:'flex', flexDirection:'column', gap:'6px' },
     lbl:         { fontSize:'12px', fontWeight:'700', color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.5px' },
     mFoot:       { display:'flex', justifyContent:'flex-end', gap:'10px', marginTop:'24px', paddingTop:'18px', borderTop:'1px solid #F3F4F6' },
-};
+};

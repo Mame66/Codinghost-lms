@@ -2,25 +2,66 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/axios';
 import { Ic, IconBadge } from '../components/Icons';
+import { AvatarUpload } from '../components/Avatar';
+
+// ✅ FIX : défini HORS du composant Settings. Avant, il était recréé à chaque
+// frappe → le champ perdait le focus après chaque caractère.
+const PasswordInput = ({ label, field, placeholder, value, visible, onChange, onToggle }) => (
+    <div style={s.fg}>
+        <label style={s.fl}>{label}</label>
+        <div style={{ position: 'relative' }}>
+            <input style={{ ...s.fi, paddingRight: '40px', width: '100%', boxSizing: 'border-box' }}
+                   type={visible ? 'text' : 'password'}
+                   placeholder={placeholder}
+                   autoComplete={field === 'currentPassword' ? 'current-password' : 'new-password'}
+                   value={value}
+                   onChange={e => onChange(field, e.target.value)} />
+            <button type="button" style={s.eyeBtn} onClick={() => onToggle(field)}>
+                <Ic name={visible ? 'eye_off' : 'eye'} size={15} color="#9CA3AF" />
+            </button>
+        </div>
+    </div>
+);
 
 export default function Settings() {
-    const { user } = useAuth();
+    const { user, updateUser } = useAuth();
     const isAdmin = user?.role === 'ADMIN';
     const [activeTab, setActiveTab] = useState('account');
     const [saving, setSaving] = useState(false);
     const [savedMsg, setSavedMsg] = useState('');
-    const [profile, setProfile] = useState({ nom: '', prenom: '', email: '', login: '', role: '' });
+    const [profile, setProfile] = useState({ nom: '', prenom: '', email: '', login: '', role: '', avatarUrl: null, telephone: '' });
+    const [phone, setPhone] = useState('');
     const [passForm, setPassForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    const [showPass, setShowPass] = useState({ current: false, new: false, confirm: false });
+    const [showPass, setShowPass] = useState({ currentPassword: false, newPassword: false, confirmPassword: false });
     const [passError, setPassError] = useState('');
     const [schoolForm, setSchoolForm] = useState({ name: 'CodingHost', email: 'contact@codinghost.fr', phone: '07 49 26 10 17', address: 'Présentiel : Thionville & Metz', founder: 'Annie Laurie Gatia-Chaboisseau', currency: 'EUR', country: 'France' });
 
-    useEffect(() => { fetchProfile(); }, []);
+    useEffect(() => { fetchProfile(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchProfile = async () => {
-        try { const res = await api.get('/settings/profile'); setProfile(res.data); }
-        catch { if (user) setProfile({ nom: user.nom || '', prenom: user.prenom || '', email: user.email || '', login: user.login || '', role: user.role || '' }); }
+        try { const res = await api.get('/settings/profile'); setProfile(res.data); setPhone(res.data.telephone || ''); }
+        catch { if (user) setProfile({ nom: user.nom || '', prenom: user.prenom || '', email: user.email || '', login: user.login || '', role: user.role || '', avatarUrl: user.avatarUrl || null }); }
     };
+
+    const onAvatarChange = (url) => {
+        setProfile(p => ({ ...p, avatarUrl: url }));
+        updateUser({ avatarUrl: url });
+        showSuccess(url ? 'Photo de profil mise à jour !' : 'Photo retirée');
+    };
+
+    const savePhone = async () => {
+        setSaving(true);
+        try {
+            const r = await api.put('/settings/profile', { telephone: phone });
+            setProfile(p => ({ ...p, telephone: r.data.telephone }));
+            updateUser({ telephone: r.data.telephone });
+            showSuccess('Téléphone enregistré');
+        } catch { alert('Erreur sauvegarde'); }
+        setSaving(false);
+    };
+
+    const onPassChange = (field, value) => setPassForm(f => ({ ...f, [field]: value }));
+    const onPassToggle = (field) => setShowPass(p => ({ ...p, [field]: !p[field] }));
 
     const showSuccess = (msg) => { setSavedMsg(msg); setTimeout(() => setSavedMsg(''), 3000); };
 
@@ -49,7 +90,7 @@ export default function Settings() {
         ADMIN:        { label: 'Administrateur', icon: 'shield',  color: '#5B2EE8', bg: '#EDE8FF' },
         TEACHER:      { label: 'Enseignant',      icon: 'teacher', color: '#008060', bg: '#ECFDF5' },
         TEACHER_VIEW: { label: 'Enseignant (lecture)', icon: 'eye', color: '#0069C0', bg: '#EFF6FF' },
-        STUDENT:      { label: 'Étudiant',        icon: 'student', color: '#8B6200', bg: 'rgba(255,184,0,0.12)' },
+        STUDENT:      { label: 'Élève',           icon: 'student', color: '#8B6200', bg: 'rgba(255,184,0,0.12)' },
     };
 
     const tabs = [
@@ -60,22 +101,6 @@ export default function Settings() {
     ];
 
     const rc = roleConfig[profile.role] || roleConfig.STUDENT;
-
-    const PasswordInput = ({ label, field, placeholder }) => (
-        <div style={s.fg}>
-            <label style={s.fl}>{label}</label>
-            <div style={{ position: 'relative' }}>
-                <input style={{ ...s.fi, paddingRight: '40px' }}
-                       type={showPass[field] ? 'text' : 'password'}
-                       placeholder={placeholder}
-                       value={passForm[field]}
-                       onChange={e => setPassForm({ ...passForm, [field]: e.target.value })} />
-                <button type="button" style={s.eyeBtn} onClick={() => setShowPass(p => ({ ...p, [field]: !p[field] }))}>
-                    <Ic name={showPass[field] ? 'eye_off' : 'eye'} size={15} color="#9CA3AF" />
-                </button>
-            </div>
-        </div>
-    );
 
     return (
         <div>
@@ -111,8 +136,8 @@ export default function Settings() {
                             <div style={s.sectionTitle}><Ic name="user" size={16} color="#1A1040" /> Mon compte</div>
                             <div style={s.card}>
                                 <div style={s.profileHeader}>
-                                    <div style={s.profileAvatar}>{profile.prenom?.[0]}{profile.nom?.[0]}</div>
-                                    <div>
+                                    <AvatarUpload user={profile} size={72} onChange={onAvatarChange} />
+                                    <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
                                         <div style={s.profileName}>{profile.prenom} {profile.nom}</div>
                                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', ...s.rolePill, background: rc.bg, color: rc.color }}>
                                             <Ic name={rc.icon} size={12} color={rc.color} /> {rc.label}
@@ -140,6 +165,13 @@ export default function Settings() {
                                         </div>
                                     ))}
                                 </div>
+                                <div style={{ ...s.fg, maxWidth: '360px' }}>
+                                    <label style={s.fl}>Mon téléphone</label>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <input style={{ ...s.fi, flex: 1 }} value={phone} onChange={e => setPhone(e.target.value)} placeholder="06 XX XX XX XX" />
+                                        <button style={{ ...s.btnP, padding: '10px 16px' }} onClick={savePhone} disabled={saving}>OK</button>
+                                    </div>
+                                </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FFFBEB', border: '1px solid #FEF3C7', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#8B6200', fontWeight: '600' }}>
                                     <Ic name="info" size={14} color="#8B6200" />
                                     Pour modifier votre nom ou prénom, contactez un administrateur.
@@ -153,10 +185,10 @@ export default function Settings() {
                         <div>
                             <div style={s.sectionTitle}><Ic name="lock" size={16} color="#1A1040" /> Changer le mot de passe</div>
                             <div style={s.card}>
-                                <PasswordInput label="Mot de passe actuel *" field="currentPassword" placeholder="••••••••" />
+                                <PasswordInput label="Mot de passe actuel *" field="currentPassword" placeholder="••••••••" value={passForm.currentPassword} visible={!!showPass.currentPassword} onChange={onPassChange} onToggle={onPassToggle} />
                                 <div style={s.formGrid}>
-                                    <PasswordInput label="Nouveau mot de passe *" field="newPassword" placeholder="Min. 6 caractères" />
-                                    <PasswordInput label="Confirmer *" field="confirmPassword" placeholder="••••••••" />
+                                    <PasswordInput label="Nouveau mot de passe *" field="newPassword" placeholder="Min. 6 caractères" value={passForm.newPassword} visible={!!showPass.newPassword} onChange={onPassChange} onToggle={onPassToggle} />
+                                    <PasswordInput label="Confirmer *" field="confirmPassword" placeholder="••••••••" value={passForm.confirmPassword} visible={!!showPass.confirmPassword} onChange={onPassChange} onToggle={onPassToggle} />
                                 </div>
 
                                 {passForm.newPassword && (
@@ -337,7 +369,7 @@ const s = {
     content: {},
     sectionTitle: { display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'sans-serif', fontSize: '16px', fontWeight: '800', color: '#1A1040', marginBottom: '16px' },
     card: { background: '#fff', border: '1px solid #E5E0F5', borderRadius: '14px', padding: '24px' },
-    profileHeader: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' },
+    profileHeader: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' },
     profileAvatar: { width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(135deg,#5B2EE8,#A78BFF)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: '800', flexShrink: 0 },
     profileName: { fontFamily: 'sans-serif', fontSize: '20px', fontWeight: '800', color: '#1A1040', marginBottom: '6px' },
     rolePill: { display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '50px', fontSize: '12px', fontWeight: '800' },

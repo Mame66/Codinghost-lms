@@ -1,7 +1,14 @@
 const nodemailer = require('nodemailer');
 
-// ── Transporteur Gmail ────────────────────────────────────
-const transporter = nodemailer.createTransport({
+// ════════════════════════════════════════════════════════════
+// ENVOI — trois possibilités, choisies selon les variables présentes :
+//   1. BREVO_API_KEY   → API Brevo (HTTPS)     ← recommandé sur Railway
+//   2. RESEND_API_KEY  → API Resend (HTTPS)
+//   3. EMAIL_USER + EMAIL_PASS → Gmail (SMTP)  ← bloqué par Railway hors offre Pro
+// Expéditeur : EMAIL_FROM (adresse validée chez Brevo / Resend), sinon EMAIL_USER.
+// EMAIL_REPLY_TO : adresse qui reçoit les réponses des parents (optionnel).
+// ════════════════════════════════════════════════════════════
+const smtp = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
@@ -9,12 +16,76 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+const emailProvider = () => {
+    if (process.env.BREVO_API_KEY) return 'brevo';
+    if (process.env.RESEND_API_KEY) return 'resend';
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) return 'smtp';
+    return null;
+};
+const fromAddress = () => process.env.EMAIL_FROM || process.env.EMAIL_USER || '';
+const fromName = () => process.env.EMAIL_FROM_NAME || 'CodingHost';
+
+// "Nom <a@b.fr>" ou "a@b.fr" → { name, email }
+const parseAddress = (v) => {
+    const m = String(v || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+    return m ? { name: m[1].trim() || undefined, email: m[2].trim() } : { email: String(v || '').trim() };
+};
+const htmlToText = (html) => String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|h\d|li|tr)>/gi, '\n')
+    .replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n').trim();
+
+const httpError = async (res, name) => {
+    let detail = '';
+    try { detail = await res.text(); } catch {}
+    return new Error(`${name} a refusé l'envoi (${res.status}) ${detail.slice(0, 300)}`);
+};
+
+// Même interface que nodemailer : sendMail({ from, to, subject, html, replyTo })
+const transporter = {
+    sendMail: async ({ to, subject, html, text, replyTo }) => {
+        const provider = emailProvider();
+        if (!provider) throw new Error('Envoi d\'emails non configuré (BREVO_API_KEY, RESEND_API_KEY ou EMAIL_USER/EMAIL_PASS)');
+        const sender = { name: fromName(), email: fromAddress() };
+        const dest = parseAddress(to);
+        const reply = replyTo || process.env.EMAIL_REPLY_TO || undefined;
+        const plain = text || htmlToText(html);
+
+        if (provider === 'brevo') {
+            const res = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
+                method: 'POST',
+                headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
+                body: JSON.stringify({
+                    sender, to: [dest], subject, htmlContent: html, textContent: plain,
+                    ...(reply ? { replyTo: parseAddress(reply) } : {}),
+                }),
+            });
+            if (!res.ok) throw await httpError(res, 'Brevo');
+            return res.json().catch(() => ({}));
+        }
+        if (provider === 'resend') {
+            const res = await fetch(process.env.RESEND_API_URL || 'https://api.resend.com/emails', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    from: `${sender.name} <${sender.email}>`, to: [dest.email], subject, html, text: plain,
+                    ...(reply ? { reply_to: parseAddress(reply).email } : {}),
+                }),
+            });
+            if (!res.ok) throw await httpError(res, 'Resend');
+            return res.json().catch(() => ({}));
+        }
+        return smtp.sendMail({ from: `"${sender.name}" <${sender.email}>`, to, subject, html, text: plain, ...(reply ? { replyTo: reply } : {}) });
+    },
+};
+
 // ── Infos école ───────────────────────────────────────────
 const SCHOOL = {
     name:    'CodingHost',
     address: '6 rue de la Tour, 57100 Thionville',
     tel:     '06.21.68.09.20',
-    email:   process.env.EMAIL_USER || 'codinghost2025@gmail.com',
+    email:   process.env.EMAIL_REPLY_TO || process.env.EMAIL_FROM || process.env.EMAIL_USER || 'codinghost2025@gmail.com',
     website: 'https://codinghost.fr',
 };
 
@@ -69,7 +140,7 @@ const baseTemplate = (content, title = 'CodingHost') => `
 <div class="wrapper">
     <div class="header">
         <div class="logo">Coding<span>Host</span></div>
-        <div class="header-sub">Académie de programmation pour enfants et adolescents</div>
+        <div class="header-sub">Centre de formation numérique · Enfants et adultes</div>
     </div>
     <div class="body">
         ${content}
@@ -133,6 +204,36 @@ const sendWelcomeEmail = async ({ to, parentName, studentName, login, password, 
         to,
         subject: `🎉 Bienvenue chez CodingHost — Identifiants de connexion de ${studentName}`,
         html: baseTemplate(content, 'Bienvenue chez CodingHost'),
+    });
+};
+
+// ════════════════════════════════════════════════════════════
+// 1 bis. EMAIL BIENVENUE ENSEIGNANT
+// ════════════════════════════════════════════════════════════
+const sendTeacherWelcomeEmail = async ({ to, prenom, login, password }) => {
+    const content = `
+        <div class="greeting">Bienvenue dans l'équipe, ${prenom} ! 👋</div>
+        <p class="text">Votre accès enseignant à la plateforme CodingHost est prêt.</p>
+
+        <div class="credentials">
+            <div class="card-title" style="color:#A78BFF">Identifiants de connexion</div>
+            <div class="cred-row"><span class="cred-label">🌐 Plateforme</span><span class="cred-value">${SCHOOL.website}/login/equipe</span></div>
+            <div class="cred-row"><span class="cred-label">👤 Login</span><span class="cred-value">${login}</span></div>
+            <div class="cred-row"><span class="cred-label">🔑 Mot de passe</span><span class="cred-value">${password}</span></div>
+        </div>
+
+        <div class="alert alert-warning">
+            🔒 Pour votre sécurité, changez ce mot de passe dès votre première connexion (menu Paramètres → Sécurité).
+        </div>
+
+        <a href="${SCHOOL.website}/login/equipe" class="btn">Se connecter →</a>
+    `;
+
+    return transporter.sendMail({
+        from: `"CodingHost" <${process.env.EMAIL_USER}>`,
+        to,
+        subject: `Votre accès enseignant CodingHost`,
+        html: baseTemplate(content, 'Accès enseignant'),
     });
 };
 
@@ -404,7 +505,13 @@ const sendSafe = async (fn, logData, prisma) => {
 };
 
 module.exports = {
+    transporter,
+    baseTemplate,
+    SCHOOL,
+    emailProvider,
+    fromAddress,
     sendWelcomeEmail,
+    sendTeacherWelcomeEmail,
     sendHomeworkAssignedEmail,
     sendHomeworkCorrectedEmail,
     sendAbsenceEmail,
@@ -413,4 +520,4 @@ module.exports = {
     sendWeeklySummaryEmail,
     sendSafe,
     logEmail,
-};
+};

@@ -1,12 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+
+// Paiements : réservé à l'administration
+router.use(protect, allowRoles('ADMIN'));
 
 // GET tous les paiements
-router.get('/', protect, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const payments = await prisma.payment.findMany({
             include: {
@@ -26,7 +28,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // GET paiements d'un groupe
-router.get('/group/:groupId', protect, async (req, res) => {
+router.get('/group/:groupId', async (req, res) => {
     try {
         const payments = await prisma.payment.findMany({
             where: { groupId: parseInt(req.params.groupId) },
@@ -46,7 +48,7 @@ router.get('/group/:groupId', protect, async (req, res) => {
 });
 
 // POST créer un paiement
-router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+router.post('/', allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { studentId, groupId, montant, description, statut } = req.body;
     try {
         const payment = await prisma.payment.create({
@@ -65,7 +67,7 @@ router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
 });
 
 // PUT modifier statut paiement
-router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+router.put('/:id', allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     const { statut, montant, description } = req.body;
     try {
         const payment = await prisma.payment.update({
@@ -83,7 +85,7 @@ router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => 
 });
 
 // DELETE supprimer un paiement
-router.delete('/:id', protect, allowRoles('ADMIN'), async (req, res) => {
+router.delete('/:id', allowRoles('ADMIN'), async (req, res) => {
     try {
         await prisma.payment.delete({ where: { id: parseInt(req.params.id) } });
         res.json({ message: 'Paiement supprimé' });

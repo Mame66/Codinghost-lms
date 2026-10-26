@@ -1,13 +1,17 @@
 const express = require('express');
 const router  = express.Router();
 const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const { studentCourseIds } = require('../lib/access');
+const { deleteChapters, deleteChaptersTx, pathsOfChapters, cleanupPaths } = require('../lib/courseFiles');
+
+const staff = allowRoles('ADMIN', 'TEACHER', 'TEACHER_VIEW');
+const AUDIENCES = ['ENFANT', 'ADULTE'];
 
 // Include standard pour un cours complet
 const courseInclude = {
     courseGroups: {
-        include: { group: { select: { id: true, titre: true } } }
+        include: { group: { select: { id: true, titre: true, audience: true, ville: true } } }
     },
     modules: {
         orderBy: { ordre: 'asc' },
@@ -25,69 +29,59 @@ const courseInclude = {
     }
 };
 
+// Vérifie que les groupes choisis ont le même public que le cours
+const checkGroupsAudience = async (groupIds, audience) => {
+    if (!groupIds || groupIds.length === 0) return null;
+    const groups = await prisma.group.findMany({
+        where: { id: { in: groupIds.map(g => parseInt(g)) } },
+        select: { titre: true, audience: true },
+    });
+    const wrong = groups.filter(g => g.audience !== audience);
+    if (wrong.length === 0) return null;
+    const label = audience === 'ADULTE' ? 'adultes' : 'enfants';
+    return `Ce cours est réservé aux ${label} : impossible de l'assigner à ${wrong.map(g => `« ${g.titre} »`).join(', ')}.`;
+};
+
 // ─────────────────────────────────────────────
 // COURS
 // ─────────────────────────────────────────────
 
-// GET cours de l'étudiant connecté — TOUS les cours de son groupe
+// GET /courses/my → cours des groupes de l'élève connecté
 router.get('/my', protect, async (req, res) => {
     try {
-        // 1. Trouver l'étudiant connecté
-        const student = await prisma.student.findFirst({
-            where: { userId: req.user.id },
-            include: { enrollments: { select: { groupId: true } } }
-        });
+        const ids = await studentCourseIds(req.user.id);
+        if (ids.length === 0) return res.json([]);
 
-        if (!student || student.enrollments.length === 0) return res.json([]);
-
-        const groupIds = student.enrollments.map(e => e.groupId);
-
-        // 2. Trouver TOUS les courseIds liés à ces groupes
-        const courseGroups = await prisma.courseGroup.findMany({
-            where: { groupId: { in: groupIds } },
-            select: { courseId: true }
-        });
-
-        if (courseGroups.length === 0) return res.json([]);
-
-        // 3. Dédupliquer les courseIds
-        const uniqueCourseIds = [...new Set(courseGroups.map(cg => cg.courseId))];
-
-        // 4. Charger chaque cours avec tous ses détails
         const courses = await prisma.course.findMany({
-            where: { id: { in: uniqueCourseIds } },
+            where: { id: { in: ids } },
             include: {
-                courseGroups: {
-                    include: { group: { select: { id: true, titre: true } } }
-                },
                 modules: {
                     orderBy: { ordre: 'asc' },
                     include: {
                         chapters: {
                             orderBy: { ordre: 'asc' },
-                            include: { tasks: { orderBy: { ordre: 'asc' } } }
+                            select: { id: true, titre: true, ordre: true, locked: true, moduleId: true },
                         }
                     }
                 },
-                chapters: {
-                    where: { moduleId: null },
-                    orderBy: { ordre: 'asc' },
-                    include: { tasks: { orderBy: { ordre: 'asc' } } }
-                }
-            }
+            },
+            orderBy: { createdAt: 'asc' },
         });
-
         res.json(courses);
     } catch (err) {
         console.error('GET /courses/my error:', err.message);
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
-// GET tous les cours (admin/teacher)
-router.get('/', protect, async (req, res) => {
+
+// GET /courses?audience=ENFANT|ADULTE (personnel)
+router.get('/', protect, staff, async (req, res) => {
     try {
+        const { audience } = req.query;
         const courses = await prisma.course.findMany({
-            include: courseInclude
+            where: AUDIENCES.includes(audience) ? { audience } : {},
+            include: courseInclude,
+            orderBy: { createdAt: 'desc' },
         });
         res.json(courses);
     } catch (err) {
@@ -96,31 +90,23 @@ router.get('/', protect, async (req, res) => {
     }
 });
 
-// GET un cours par ID
-router.get('/:id', protect, async (req, res) => {
-    try {
-        const course = await prisma.course.findUnique({
-            where: { id: parseInt(req.params.id) },
-            include: courseInclude
-        });
-        if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
-        res.json(course);
-    } catch (err) {
-        console.error('GET /courses/:id error:', err.message);
-        res.status(500).json({ message: 'Erreur serveur', error: err.message });
-    }
-});
-
-// POST créer un cours
+// POST /courses
 router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    const { titre, description, niveau, groupIds, lockedByAdmin } = req.body;
+    const { titre, description, niveau, groupIds, lockedByAdmin, coverImage } = req.body;
+    const audience = AUDIENCES.includes(req.body.audience) ? req.body.audience : 'ENFANT';
+    if (!titre || !String(titre).trim()) return res.status(400).json({ message: 'Titre obligatoire' });
     try {
+        const err = await checkGroupsAudience(groupIds, audience);
+        if (err) return res.status(400).json({ message: err });
+
         const course = await prisma.course.create({
             data: {
-                titre,
+                titre:         String(titre).trim(),
                 description:   description   || null,
                 niveau:        niveau        || null,
-                lockedByAdmin: lockedByAdmin || false,
+                coverImage:    coverImage    || null,
+                audience,
+                lockedByAdmin: req.user.role === 'ADMIN' ? !!lockedByAdmin : false,
                 createdBy:     req.user.id,
                 courseGroups: {
                     create: (groupIds || []).map(gId => ({ groupId: parseInt(gId) }))
@@ -133,107 +119,6 @@ router.post('/', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
     }
 });
-
-// PUT modifier un cours
-router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    const { titre, description, niveau, groupIds, lockedByAdmin } = req.body;
-    try {
-        const existing = await prisma.course.findUnique({ where: { id: parseInt(req.params.id) } });
-        if (!existing) return res.status(404).json({ message: 'Cours non trouvé' });
-        if (req.user.role === 'TEACHER' && existing.lockedByAdmin)
-            return res.status(403).json({ message: 'Cours verrouillé par l\'administrateur' });
-
-        const course = await prisma.course.update({
-            where: { id: parseInt(req.params.id) },
-            data: {
-                titre:         titre         !== undefined ? titre         : existing.titre,
-                description:   description   !== undefined ? description   : existing.description,
-                niveau:        niveau        !== undefined ? niveau        : existing.niveau,
-                lockedByAdmin: lockedByAdmin !== undefined ? lockedByAdmin : existing.lockedByAdmin,
-            }
-        });
-
-        if (groupIds !== undefined) {
-            await prisma.courseGroup.deleteMany({ where: { courseId: parseInt(req.params.id) } });
-            if (groupIds.length > 0) {
-                await prisma.courseGroup.createMany({
-                    data: groupIds.map(gId => ({
-                        courseId: parseInt(req.params.id),
-                        groupId:  parseInt(gId)
-                    }))
-                });
-            }
-        }
-        res.json(course);
-    } catch (err) {
-        console.error('PUT /courses/:id error:', err.message);
-        res.status(500).json({ message: 'Erreur serveur', error: err.message });
-    }
-});
-
-router.delete('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
-    const id = parseInt(req.params.id);
-    try {
-        // 1. Supprimer LessonProgress liés aux chapitres du cours
-        await prisma.lessonProgress.deleteMany({
-            where: { chapter: { courseId: id } }
-        });
-
-        // 2. Supprimer LessonProgress liés aux leçons dans les modules
-        await prisma.lessonProgress.deleteMany({
-            where: { chapter: { module: { courseId: id } } }
-        });
-
-        // 3. Supprimer QcmQuestion liés aux chapitres directs
-        await prisma.qcmQuestion.deleteMany({
-            where: { chapter: { courseId: id } }
-        });
-
-        // 4. Supprimer QcmQuestion liés aux leçons dans les modules
-        await prisma.qcmQuestion.deleteMany({
-            where: { chapter: { module: { courseId: id } } }
-        });
-
-        // 5. Supprimer Homework liés aux tâches
-        const tasks = await prisma.task.findMany({
-            where: { chapter: { courseId: id } }
-        });
-        if (tasks.length > 0) {
-            await prisma.homework.deleteMany({
-                where: { taskId: { in: tasks.map(t => t.id) } }
-            });
-        }
-
-        // 6. Supprimer Tasks liés aux chapitres directs
-        await prisma.task.deleteMany({
-            where: { chapter: { courseId: id } }
-        });
-
-        // 7. Supprimer chapitres directs (courseId)
-        await prisma.chapter.deleteMany({ where: { courseId: id } });
-
-        // 8. Supprimer chapitres dans les modules
-        const modules = await prisma.module.findMany({ where: { courseId: id } });
-        for (const mod of modules) {
-            await prisma.chapter.deleteMany({ where: { moduleId: mod.id } });
-        }
-
-        // 9. Supprimer les modules
-        await prisma.module.deleteMany({ where: { courseId: id } });
-
-        // 10. Supprimer CourseGroup
-        await prisma.courseGroup.deleteMany({ where: { courseId: id } });
-
-        // 11. Supprimer le cours
-        await prisma.course.delete({ where: { id } });
-
-        res.json({ message: 'Cours supprimé avec succès' });
-    } catch (err) {
-        console.error('DELETE /courses/:id error:', err.message);
-        res.status(500).json({ message: 'Erreur suppression', error: err.message });
-    }
-});
-
 
 // ─────────────────────────────────────────────
 // MODULES
@@ -295,7 +180,9 @@ router.put('/:id/modules/reorder', protect, allowRoles('ADMIN', 'TEACHER'), asyn
 // DELETE supprimer un module
 router.delete('/modules/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     try {
-        await prisma.module.delete({ where: { id: parseInt(req.params.id) } });
+        const id = parseInt(req.params.id);
+        const chapters = await prisma.chapter.findMany({ where: { moduleId: id }, select: { id: true } });
+        await deleteChapters(chapters.map(c => c.id), (tx) => tx.module.delete({ where: { id } }));
         res.json({ message: 'Module supprimé' });
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
@@ -396,7 +283,7 @@ router.put('/:id/chapters/reorder', protect, allowRoles('ADMIN', 'TEACHER'), asy
 // DELETE supprimer un chapitre
 router.delete('/chapters/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
     try {
-        await prisma.chapter.delete({ where: { id: parseInt(req.params.id) } });
+        await deleteChapters([parseInt(req.params.id)]);
         res.json({ message: 'Chapitre supprimé' });
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
@@ -545,7 +432,7 @@ router.post('/tasks/:id/questions', protect, allowRoles('ADMIN', 'TEACHER'), asy
 });
 
 // GET questions QCM d'une tâche
-router.get('/tasks/:id/questions', protect, async (req, res) => {
+router.get('/tasks/:id/questions', protect, staff, async (req, res) => {
     try {
         const questions = await prisma.qcmQuestion.findMany({
             where:   { taskId: parseInt(req.params.id) },
@@ -554,6 +441,180 @@ router.get('/tasks/:id/questions', protect, async (req, res) => {
         res.json(questions);
     } catch (err) {
         res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────
+// DUPLIQUER UN COURS
+// Copie modules, leçons, quiz, fichiers et liens (les fichiers ne sont
+// pas recopiés dans le stockage : la copie les partage). Pas les groupes
+// ni la progression des élèves.
+// body optionnel : { titre, audience }
+// ─────────────────────────────────────────────
+router.post('/:id/duplicate', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+        const src = await prisma.course.findUnique({
+            where: { id },
+            include: {
+                modules: { orderBy: { ordre: 'asc' } },
+                chapters: {
+                    orderBy: { ordre: 'asc' },
+                    include: {
+                        quizQuestions: { where: { chapterId: { not: null } }, orderBy: { ordre: 'asc' } },
+                        resources: { orderBy: [{ ordre: 'asc' }, { id: 'asc' }] },
+                    },
+                },
+            },
+        });
+        if (!src) return res.status(404).json({ message: 'Cours non trouvé' });
+        const titre = String(req.body.titre || '').trim() || `${src.titre} (copie)`;
+        const audience = AUDIENCES.includes(req.body.audience) ? req.body.audience : src.audience;
+
+        const course = await prisma.$transaction(async (tx) => {
+            const c = await tx.course.create({
+                data: {
+                    titre, audience,
+                    description: src.description, niveau: src.niveau, coverImage: src.coverImage,
+                    lockedByAdmin: false, createdBy: req.user.id,
+                },
+            });
+            const moduleMap = new Map();
+            for (const m of src.modules) {
+                const nm = await tx.module.create({
+                    data: { courseId: c.id, titre: m.titre, description: m.description, ordre: m.ordre, locked: m.locked },
+                });
+                moduleMap.set(m.id, nm.id);
+            }
+            for (const ch of src.chapters) {
+                const nc = await tx.chapter.create({
+                    data: {
+                        courseId: c.id,
+                        moduleId: ch.moduleId ? (moduleMap.get(ch.moduleId) ?? null) : null,
+                        titre: ch.titre, ordre: ch.ordre, locked: ch.locked,
+                        objectives: ch.objectives, teacherGuideUrl: ch.teacherGuideUrl,
+                        studentSlidesUrl: ch.studentSlidesUrl, imageUrl: ch.imageUrl,
+                        challengeContent: ch.challengeContent, challengeLang: ch.challengeLang,
+                        homeworkEnabled: ch.homeworkEnabled, homeworkInstructions: ch.homeworkInstructions,
+                        homeworkDueDate: null, // la date limite dépend de la nouvelle session
+                    },
+                });
+                if (ch.quizQuestions.length) {
+                    await tx.qcmQuestion.createMany({
+                        data: ch.quizQuestions.map(q => ({
+                            chapterId: nc.id, taskId: null, question: q.question, options: q.options, correct: q.correct, ordre: q.ordre,
+                        })),
+                    });
+                }
+                if (ch.resources.length) {
+                    await tx.lessonResource.createMany({
+                        data: ch.resources.map(r => ({
+                            chapterId: nc.id, kind: r.kind, titre: r.titre, url: r.url, storagePath: r.storagePath,
+                            fileName: r.fileName, mimeType: r.mimeType, size: r.size, visibility: r.visibility, ordre: r.ordre,
+                        })),
+                    });
+                }
+            }
+            return c;
+        }, { timeout: 60000 });
+        res.status(201).json(course);
+    } catch (err) {
+        console.error('POST /courses/:id/duplicate error:', err.message);
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────
+// COURS PAR ID — déclarées APRÈS les routes /modules, /chapters, /tasks
+// sinon Express prend "modules" pour un :id
+// ─────────────────────────────────────────────
+
+// GET /courses/:id
+router.get('/:id', protect, staff, async (req, res) => {
+    try {
+        const course = await prisma.course.findUnique({
+            where: { id: parseInt(req.params.id) },
+            include: courseInclude
+        });
+        if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+        res.json(course);
+    } catch (err) {
+        console.error('GET /courses/:id error:', err.message);
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+
+// PUT /courses/:id
+router.put('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const { titre, description, niveau, groupIds, lockedByAdmin, coverImage, audience } = req.body;
+    const id = parseInt(req.params.id);
+    try {
+        const existing = await prisma.course.findUnique({ where: { id } });
+        if (!existing) return res.status(404).json({ message: 'Cours non trouvé' });
+        if (req.user.role === 'TEACHER' && existing.lockedByAdmin)
+            return res.status(403).json({ message: 'Cours verrouillé par l\'administrateur' });
+        if (req.user.role === 'TEACHER' && lockedByAdmin !== undefined && lockedByAdmin !== existing.lockedByAdmin)
+            return res.status(403).json({ message: 'Seul un administrateur peut verrouiller un cours' });
+
+        const newAudience = AUDIENCES.includes(audience) ? audience : existing.audience;
+        const targetGroups = groupIds !== undefined
+            ? groupIds
+            : (await prisma.courseGroup.findMany({ where: { courseId: id }, select: { groupId: true } })).map(c => c.groupId);
+        const err = await checkGroupsAudience(targetGroups, newAudience);
+        if (err) return res.status(400).json({ message: err });
+
+        const course = await prisma.course.update({
+            where: { id },
+            data: {
+                titre:         titre         !== undefined ? titre         : existing.titre,
+                description:   description   !== undefined ? (description || null) : existing.description,
+                niveau:        niveau        !== undefined ? (niveau || null)      : existing.niveau,
+                coverImage:    coverImage    !== undefined ? (coverImage || null)  : existing.coverImage,
+                lockedByAdmin: lockedByAdmin !== undefined ? !!lockedByAdmin       : existing.lockedByAdmin,
+                audience:      newAudience,
+            }
+        });
+
+        if (groupIds !== undefined) {
+            await prisma.$transaction([
+                prisma.courseGroup.deleteMany({ where: { courseId: id } }),
+                prisma.courseGroup.createMany({
+                    data: groupIds.map(gId => ({ courseId: id, groupId: parseInt(gId) })),
+                    skipDuplicates: true,
+                }),
+            ]);
+        }
+        res.json(course);
+    } catch (err) {
+        console.error('PUT /courses/:id error:', err.message);
+        res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    }
+});
+
+// DELETE /courses/:id
+router.delete('/:id', protect, allowRoles('ADMIN', 'TEACHER'), async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+        const course = await prisma.course.findUnique({ where: { id } });
+        if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+        if (req.user.role === 'TEACHER' && course.lockedByAdmin)
+            return res.status(403).json({ message: 'Cours verrouillé par l\'administrateur' });
+
+        const chapterIds = (await prisma.chapter.findMany({ where: { courseId: id }, select: { id: true } })).map(c => c.id);
+        const paths = await pathsOfChapters(chapterIds);
+        await prisma.$transaction(async (tx) => {
+            // anciennes tâches, quiz, progression, fichiers et devoirs rendus des leçons
+            await deleteChaptersTx(tx, chapterIds);
+            await tx.module.deleteMany({ where: { courseId: id } });
+            await tx.course.delete({ where: { id } });                                  // liaisons groupes en cascade
+        }, { timeout: 30000 });
+        // fichiers qui ne servent plus à aucun autre cours (les copies partagent les fichiers)
+        await cleanupPaths(paths);
+
+        res.json({ message: 'Cours supprimé avec succès' });
+    } catch (err) {
+        console.error('DELETE /courses/:id error:', err.message);
+        res.status(500).json({ message: 'Erreur suppression', error: err.message });
     }
 });
 

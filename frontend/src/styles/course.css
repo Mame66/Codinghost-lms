@@ -1,0 +1,15 @@
+/* Contenus de cours : animations et adaptations mobile */
+@keyframes chspin { to { transform: rotate(360deg); } }
+
+@media (max-width: 640px) {
+  .ch-hide-sm { display: none !important; }
+  .ch-stack-sm { grid-template-columns: minmax(0, 1fr) !important; }
+  .ch-wrap-sm { flex-wrap: wrap !important; }
+}
+
+/* Leçon côté élève : la colonne de gauche passe au-dessus sur téléphone */
+@media (max-width: 760px) {
+  .ch-course-layout { flex-direction: column !important; height: auto !important; overflow: visible !important; }
+  .ch-course-side { width: 100% !important; border-right: none !important; border-bottom: 1px solid #EBEBF0; max-height: 46vh; }
+  .ch-course-pad { padding-left: 16px !important; padding-right: 16px !important; }
+}

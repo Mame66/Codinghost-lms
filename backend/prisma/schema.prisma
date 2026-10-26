@@ -16,11 +16,20 @@ model User {
   password      String
   plainPassword String?
   role          Role     @default(STUDENT)
+  avatarUrl     String?
+  telephone     String?
+  specialites   String?
+  actif         Boolean  @default(true)
   createdAt     DateTime @default(now())
 
   student          Student?
   taughtGroups     Group[]  @relation("TeacherGroups")
   supervisedGroups Group[]  @relation("SupervisorGroups")
+}
+
+enum Audience {
+  ENFANT
+  ADULTE
 }
 
 enum Role {
@@ -45,6 +54,7 @@ model Student {
   payments    Payment[]
   contracts  Contract[]
   lessonProgress  LessonProgress[]
+  lessonSubmissions LessonSubmission[]
 }
 
 model Course {
@@ -59,14 +69,15 @@ model Course {
   chapters     Chapter[]
   courseGroups CourseGroup[]
   coverImage  String?
+  audience    Audience @default(ENFANT)
 }
 
 model CourseGroup {
   id       Int    @id @default(autoincrement())
   courseId Int
-  course   Course @relation(fields: [courseId], references: [id])
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
   groupId  Int
-  group    Group  @relation(fields: [groupId], references: [id])
+  group    Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([courseId, groupId])
 }
@@ -90,6 +101,56 @@ model Chapter {
   challengeLang    String?  @default("python")
   lessonProgress   LessonProgress[]
   quizQuestions    QcmQuestion[]
+
+  // Devoir à rendre (optionnel)
+  homeworkEnabled      Boolean   @default(false)
+  homeworkInstructions String?
+  homeworkDueDate      DateTime?
+
+  resources   LessonResource[]
+  submissions LessonSubmission[]
+}
+
+// Fichier (Supabase Storage) ou lien (Drive, YouTube…) attaché à une leçon
+model LessonResource {
+  id          Int      @id @default(autoincrement())
+  chapterId   Int
+  chapter     Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  kind        String   @default("FILE")    // FILE | LINK
+  titre       String
+  url         String?                      // LINK
+  storagePath String?                      // FILE (bucket privé)
+  fileName    String?
+  mimeType    String?
+  size        Int?
+  visibility  String   @default("STUDENT") // STUDENT | TEACHER
+  ordre       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([chapterId])
+}
+
+// Devoir rendu par un élève pour une leçon
+model LessonSubmission {
+  id               Int       @id @default(autoincrement())
+  chapterId        Int
+  chapter          Chapter   @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  studentId        Int
+  student          Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  storagePath      String?
+  fileName         String?
+  mimeType         String?
+  size             Int?
+  lienRendu        String?
+  commentaireEleve String?
+  statut           String    @default("RENDU") // RENDU | CORRIGE
+  note             Float?
+  commentaire      String?
+  submittedAt      DateTime  @default(now())
+  correctedAt      DateTime?
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([studentId, chapterId])
 }
 model Module {
   id          Int       @id @default(autoincrement())
@@ -142,6 +203,7 @@ model Group {
   type         GroupType   @default(GROUPE)
   createdAt    DateTime    @default(now())
   ville  String?
+  audience     Audience    @default(ENFANT)
 
   enrollments  Enrollment[]
   courseGroups CourseGroup[]
@@ -172,9 +234,9 @@ enum GroupType {
 model Enrollment {
   id        Int      @id @default(autoincrement())
   studentId Int
-  student   Student  @relation(fields: [studentId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
   groupId   Int
-  group     Group    @relation(fields: [groupId], references: [id])
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   attendance Attendance[]
@@ -183,7 +245,7 @@ model Enrollment {
 model Attendance {
   id           Int        @id @default(autoincrement())
   enrollmentId Int
-  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   date         DateTime
   statut       AttStatut  @default(ABSENT)
 }
@@ -223,7 +285,7 @@ enum HomeworkStatut {
 model HomeworkFile {
   id         Int      @id @default(autoincrement())
   homeworkId Int
-  homework   Homework @relation(fields: [homeworkId], references: [id])
+  homework   Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
   fileName   String
   fileUrl    String
   fileType   String
@@ -232,8 +294,8 @@ model HomeworkFile {
 
 model QcmQuestion {
   id       Int      @id @default(autoincrement())
-  taskId   Int
-  task     Task     @relation(fields: [taskId], references: [id])
+  taskId   Int?
+  task     Task?    @relation(fields: [taskId], references: [id])
   question String
   options  String[]
   correct  Int
@@ -367,6 +429,7 @@ model LessonProgress {
   slidesDone     Boolean  @default(false)
   imagesDone     Boolean  @default(false)
   challengeDone  Boolean  @default(false)
+  filesDone      Boolean  @default(false)
 
   quizSoumis     Boolean  @default(false)
   quizAnswers    Json?
@@ -379,4 +442,62 @@ model LessonProgress {
   updatedAt      DateTime @updatedAt
 
   @@unique([studentId, chapterId])
+}
+// Journal des notifications SumUp (anti-doublon + traçabilité)
+model SumupWebhook {
+  id        Int      @id @default(autoincrement())
+  eventId   String   @unique
+  type      String
+  amount    Float
+  currency  String   @default("EUR")
+  reference String?
+  status    String
+  rawData   Json?
+  processed Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ── Emails aux parents et élèves adultes ─────────────────
+// Modèle de message réutilisable ({{variables}} remplacées à l'envoi)
+model EmailTemplate {
+  id        Int      @id @default(autoincrement())
+  nom       String
+  cible     String   @default("TOUS") // PARENTS | ADULTES | TOUS
+  sujet     String
+  contenu   String
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Un envoi (à un groupe ou à une personne)
+model EmailMessage {
+  id         Int              @id @default(autoincrement())
+  sujet      String
+  contenu    String
+  cible      String           // ex. « Minecraft — Mercredi 14h (3 groupes) »
+  sentById   Int?
+  sentByNom  String?
+  total      Int              @default(0)
+  envoyes    Int              @default(0)
+  echecs     Int              @default(0)
+  createdAt  DateTime         @default(now())
+  recipients EmailRecipient[]
+}
+
+model EmailRecipient {
+  id        Int          @id @default(autoincrement())
+  messageId Int
+  message   EmailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  studentId Int?
+  type      String       // PARENT | ADULTE
+  nom       String
+  email     String?
+  eleve     String?
+  groupe    String?
+  success   Boolean      @default(false)
+  error     String?
+  createdAt DateTime     @default(now())
+
+  @@index([messageId])
 }

@@ -164,25 +164,23 @@ export default function Billing() {
     const [form, setForm]       = useState(emptyForm);
     const [payForm, setPayForm] = useState({ paidAmount:'', method:'virement', reference:'', paidAt:new Date().toISOString().split('T')[0] });
 
-    useEffect(() => { fetchAll(); }, [villeFilter]);
+    useEffect(() => { fetchAll(); }, [villeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ✅ allSettled : si une requête échoue, les autres s'affichent quand même
     const fetchAll = async () => {
         setLoading(true);
-        try {
-            const params = villeFilter !== 'Toutes' ? `?ville=${villeFilter}` : '';
-            const [cRes, sRes, gRes] = await Promise.all([
-                api.get(`/billing/contracts${params}`),
-                api.get('/students'),
-                api.get('/groups'),
-            ]);
-            setContracts(cRes.data);
-            setStudents(sRes.data);
-            setGroups(gRes.data);
-            try {
-                const stRes = await api.get(`/billing/stats${params}`);
-                setStats(stRes.data);
-            } catch {}
-        } catch (err) { console.error(err); }
+        const params = villeFilter !== 'Toutes' ? `?ville=${encodeURIComponent(villeFilter)}` : '';
+        const [cRes, sRes, gRes, stRes] = await Promise.allSettled([
+            api.get(`/billing/contracts${params}`),
+            api.get('/students'),
+            api.get('/groups'),
+            api.get(`/billing/stats${params}`),
+        ]);
+        if (cRes.status === 'fulfilled') setContracts(cRes.value.data);
+        else { console.error('contracts:', cRes.reason); showToast(cRes.reason?.response?.data?.message || 'Erreur chargement contrats', 'error'); }
+        if (sRes.status === 'fulfilled') setStudents(sRes.value.data);
+        if (gRes.status === 'fulfilled') setGroups(gRes.value.data);
+        if (stRes.status === 'fulfilled') setStats(stRes.value.data);
         setLoading(false);
     };
 
@@ -286,8 +284,12 @@ export default function Billing() {
     };
 
     const openDetail = async (c) => {
-        const r = await api.get(`/billing/contracts/${c.id}`);
-        setShowDetail(r.data);
+        try {
+            const r = await api.get(`/billing/contracts/${c.id}`);
+            setShowDetail(r.data);
+        } catch (err) {
+            showToast(err.response?.data?.message || 'Erreur chargement contrat', 'error');
+        }
     };
 
     const deleteC = async (id) => {

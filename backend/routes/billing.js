@@ -1,10 +1,9 @@
 const express    = require('express');
 const router     = express.Router();
 const nodemailer = require('nodemailer');
-const jwt        = require('jsonwebtoken');
-const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const crypto     = require('crypto');
+const { protect, adminOnly } = require('../middleware/authMiddleware');
+const prisma = require('../lib/prisma');
 
 // ── Config email ──────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -81,8 +80,17 @@ const getPdfFilename = (type, contract) => {
 const generateContractNumber = async (ville) => {
     const year   = new Date().getFullYear();
     const prefix = ville === 'Metz' ? 'CTR-MZ' : 'CTR-TH';
-    const count  = await prisma.contract.count({ where: { number: { startsWith: `${prefix}-${year}` } } });
-    return `${prefix}-${year}-${String(count + 1).padStart(3, '0')}`;
+    // ✅ On part du plus grand numéro existant (et non du nombre de contrats) :
+    // après une suppression, count() redonnait un numéro déjà pris → erreur 500.
+    const existing = await prisma.contract.findMany({
+        where:  { number: { startsWith: `${prefix}-${year}-` } },
+        select: { number: true },
+    });
+    const max = existing.reduce((m, c) => {
+        const n = parseInt(c.number.split('-').pop(), 10);
+        return Number.isFinite(n) && n > m ? n : m;
+    }, 0);
+    return `${prefix}-${year}-${String(max + 1).padStart(3, '0')}`;
 };
 
 // ── Calcul échéances ──────────────────────────────────────
@@ -111,29 +119,6 @@ const computeInstallments = (totalAmount, depositAmount, paymentMode) => {
         }));
     }
     return [];
-};
-
-// ════════════════════════════════════════════════════════════
-// MIDDLEWARE FLEX — accepte token en header Authorization
-// OU en query param ?token=... (fix téléchargement PDF)
-// ════════════════════════════════════════════════════════════
-const flexAuth = async (req, res, next) => {
-    try {
-        let token = null;
-        if (req.headers.authorization?.startsWith('Bearer ')) {
-            token = req.headers.authorization.split(' ')[1];
-        } else if (req.query.token) {
-            token = req.query.token;
-        }
-        if (!token) return res.status(401).json({ message: 'Non autorisé' });
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user    = await prisma.user.findUnique({ where: { id: decoded.id } });
-        if (!user) return res.status(401).json({ message: 'Utilisateur introuvable' });
-        req.user = user;
-        next();
-    } catch (err) {
-        return res.status(401).json({ message: 'Token invalide' });
-    }
 };
 
 // ══════════════════════════════════════════════════════════
@@ -401,7 +386,7 @@ const contractInclude = {
 // ROUTES — CONTRATS
 // ══════════════════════════════════════════════════════════
 
-router.get('/contracts', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.get('/contracts', protect, adminOnly, async (req, res) => {
     try {
         const { status, groupId, search, ville } = req.query;
         const where = {};
@@ -422,7 +407,7 @@ router.get('/contracts', protect, allowRoles('ADMIN','TEACHER'), async (req, res
     } catch(err) { res.status(500).json({message:'Erreur serveur', error:err.message}); }
 });
 
-router.get('/contracts/:id', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.get('/contracts/:id', protect, adminOnly, async (req, res) => {
     try {
         const contract = await prisma.contract.findUnique({ where:{id:parseInt(req.params.id)}, include:contractInclude });
         if (!contract) return res.status(404).json({message:'Contrat non trouvé'});
@@ -430,11 +415,16 @@ router.get('/contracts/:id', protect, allowRoles('ADMIN','TEACHER'), async (req,
     } catch(err) { res.status(500).json({message:'Erreur serveur', error:err.message}); }
 });
 
-router.post('/contracts', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.post('/contracts', protect, adminOnly, async (req, res) => {
     const { studentId, groupId, parentName, parentEmail, parentSignature,
         schoolYear, courseName, courseDay, courseStartDate, nbCours,
         totalAmount, depositAmount, depositMethod, depositPaidAt,
         paymentMode, notes, signedAt, ville } = req.body;
+    if (!studentId || !groupId || !courseName || totalAmount === undefined || totalAmount === '') {
+        return res.status(400).json({ message: 'Champs obligatoires : élève, groupe, cours, prix total' });
+    }
+    // ✅ un acompte de 0 € est valide (avant : 0 devenait 100 €)
+    const deposit = depositAmount === undefined || depositAmount === null || depositAmount === '' ? 100 : parseFloat(depositAmount);
     try {
         const villeNorm = ville || 'Thionville';
         const number    = await generateContractNumber(villeNorm);
@@ -452,7 +442,7 @@ router.post('/contracts', protect, allowRoles('ADMIN','TEACHER'), async (req, re
                 courseStartDate: courseStartDate || null,
                 nbCours:         parseInt(nbCours) || 32,
                 totalAmount:     parseFloat(totalAmount),
-                depositAmount:   parseFloat(depositAmount || 100),
+                depositAmount:   deposit,
                 depositMethod:   depositMethod   || null,
                 depositPaidAt:   depositPaidAt   ? new Date(depositPaidAt) : null,
                 paymentMode:     paymentMode     || 'ONCE',
@@ -462,7 +452,7 @@ router.post('/contracts', protect, allowRoles('ADMIN','TEACHER'), async (req, re
             },
             include: contractInclude,
         });
-        const instData = computeInstallments(parseFloat(totalAmount), parseFloat(depositAmount||100), paymentMode||'ONCE');
+        const instData = computeInstallments(parseFloat(totalAmount), deposit, paymentMode||'ONCE');
         if (instData.length > 0) {
             await prisma.installment.createMany({ data: instData.map(i => ({...i, contractId:contract.id})) });
         }
@@ -471,7 +461,7 @@ router.post('/contracts', protect, allowRoles('ADMIN','TEACHER'), async (req, re
     } catch(err) { console.error(err); res.status(500).json({message:'Erreur serveur', error:err.message}); }
 });
 
-router.put('/contracts/:id', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.put('/contracts/:id', protect, adminOnly, async (req, res) => {
     try {
         const data = {};
         ['status','parentName','parentEmail','parentSignature','courseName','courseDay',
@@ -481,8 +471,8 @@ router.put('/contracts/:id', protect, allowRoles('ADMIN','TEACHER'), async (req,
         });
         if (data.depositPaidAt) data.depositPaidAt = new Date(data.depositPaidAt);
         if (data.signedAt)      data.signedAt      = new Date(data.signedAt);
-        if (data.totalAmount)   data.totalAmount   = parseFloat(data.totalAmount);
-        if (data.depositAmount) data.depositAmount = parseFloat(data.depositAmount);
+        if (data.totalAmount   !== undefined) data.totalAmount   = parseFloat(data.totalAmount);
+        if (data.depositAmount !== undefined) data.depositAmount = parseFloat(data.depositAmount);
         if (data.nbCours)       data.nbCours       = parseInt(data.nbCours);
         if (data.depositPaidAt && !data.status) data.status = 'ACTIVE';
         const contract = await prisma.contract.update({ where:{id:parseInt(req.params.id)}, data, include:contractInclude });
@@ -490,7 +480,7 @@ router.put('/contracts/:id', protect, allowRoles('ADMIN','TEACHER'), async (req,
     } catch(err) { res.status(500).json({message:'Erreur serveur', error:err.message}); }
 });
 
-router.delete('/contracts/:id', protect, allowRoles('ADMIN'), async (req, res) => {
+router.delete('/contracts/:id', protect, adminOnly, async (req, res) => {
     try {
         await prisma.contract.delete({ where:{id:parseInt(req.params.id)} });
         res.json({message:'Contrat supprimé'});
@@ -498,10 +488,10 @@ router.delete('/contracts/:id', protect, allowRoles('ADMIN'), async (req, res) =
 });
 
 // ══════════════════════════════════════════════════════════
-// ROUTES PDF — flexAuth (header OU ?token= dans l'URL)
+// ROUTES PDF — téléchargement via axios (token dans l'en-tête uniquement)
 // ══════════════════════════════════════════════════════════
 
-router.get('/contracts/:id/invoice-pdf', flexAuth, async (req, res) => {
+router.get('/contracts/:id/invoice-pdf', protect, adminOnly, async (req, res) => {
     try {
         const contract = await prisma.contract.findUnique({ where:{id:parseInt(req.params.id)}, include:contractInclude });
         if (!contract) return res.status(404).json({message:'Contrat non trouvé'});
@@ -513,7 +503,7 @@ router.get('/contracts/:id/invoice-pdf', flexAuth, async (req, res) => {
     } catch(err) { console.error('invoice-pdf error:', err); res.status(500).json({message:'Erreur PDF', error:err.message}); }
 });
 
-router.get('/contracts/:id/contract-pdf', flexAuth, async (req, res) => {
+router.get('/contracts/:id/contract-pdf', protect, adminOnly, async (req, res) => {
     try {
         const contract = await prisma.contract.findUnique({ where:{id:parseInt(req.params.id)}, include:contractInclude });
         if (!contract) return res.status(404).json({message:'Contrat non trouvé'});
@@ -529,7 +519,7 @@ router.get('/contracts/:id/contract-pdf', flexAuth, async (req, res) => {
 // ROUTES — ÉCHÉANCES
 // ══════════════════════════════════════════════════════════
 
-router.put('/installments/:id/pay', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.put('/installments/:id/pay', protect, adminOnly, async (req, res) => {
     const { paidAmount, method, reference, paidAt } = req.body;
     try {
         const installment = await prisma.installment.update({
@@ -551,7 +541,7 @@ router.put('/installments/:id/pay', protect, allowRoles('ADMIN','TEACHER'), asyn
     } catch(err) { res.status(500).json({message:'Erreur', error:err.message}); }
 });
 
-router.post('/installments/check-late', protect, allowRoles('ADMIN'), async (req, res) => {
+router.post('/installments/check-late', protect, adminOnly, async (req, res) => {
     try {
         const result = await prisma.installment.updateMany({
             where: { status:'PENDING', dueDate:{lt:new Date()} },
@@ -565,7 +555,21 @@ router.post('/installments/check-late', protect, allowRoles('ADMIN'), async (req
 // WEBHOOK SUMUP
 // ══════════════════════════════════════════════════════════
 
+// ✅ Sécurité : l'URL du webhook doit contenir le secret partagé
+//    https://<api>/api/billing/webhook/sumup?secret=<SUMUP_WEBHOOK_SECRET>
+//    Sans SUMUP_WEBHOOK_SECRET configuré sur Railway, le webhook est désactivé.
+const checkWebhookSecret = (req) => {
+    const expected = process.env.SUMUP_WEBHOOK_SECRET;
+    const given = String(req.query.secret || req.headers['x-webhook-secret'] || '');
+    if (!expected || !given) return false;
+    const a = Buffer.from(expected), b = Buffer.from(given);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
 router.post('/webhook/sumup', async (req, res) => {
+    if (!checkWebhookSecret(req)) {
+        return res.status(401).json({ received: false, message: 'Webhook non autorisé' });
+    }
     try {
         const event = req.body;
         console.log('📩 Webhook SumUp reçu:', JSON.stringify(event));
@@ -609,7 +613,8 @@ router.post('/webhook/sumup', async (req, res) => {
                 return refLower.includes(nom) || refLower.includes(prenom);
             });
         }
-        if (!matched && pendingInstallments.length > 0) matched = pendingInstallments[0];
+        // ✅ Plus de « première échéance au hasard » : sans correspondance avec le nom de
+        //    l'élève, le paiement est seulement enregistré et devra être rapproché à la main.
 
         if (matched) {
             await prisma.installment.update({
@@ -664,7 +669,7 @@ const sendWithPdf = async (contract, pdfType, emailData) => {
     });
 };
 
-router.post('/contracts/:id/send-invoice', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.post('/contracts/:id/send-invoice', protect, adminOnly, async (req, res) => {
     try {
         const contract = await prisma.contract.findUnique({ where:{id:parseInt(req.params.id)}, include:contractInclude });
         if (!contract)             return res.status(404).json({message:'Contrat non trouvé'});
@@ -683,7 +688,7 @@ router.post('/contracts/:id/send-invoice', protect, allowRoles('ADMIN','TEACHER'
     } catch(err) { res.status(500).json({message:'Erreur', error:err.message}); }
 });
 
-router.post('/contracts/:id/send-contract', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.post('/contracts/:id/send-contract', protect, adminOnly, async (req, res) => {
     try {
         const contract = await prisma.contract.findUnique({ where:{id:parseInt(req.params.id)}, include:contractInclude });
         if (!contract)             return res.status(404).json({message:'Contrat non trouvé'});
@@ -702,7 +707,7 @@ router.post('/contracts/:id/send-contract', protect, allowRoles('ADMIN','TEACHER
     } catch(err) { res.status(500).json({message:'Erreur', error:err.message}); }
 });
 
-router.post('/installments/:id/send-receipt', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.post('/installments/:id/send-receipt', protect, adminOnly, async (req, res) => {
     try {
         const inst = await prisma.installment.findUnique({ where:{id:parseInt(req.params.id)}, include:{contract:{include:contractInclude}} });
         if (!inst)                     return res.status(404).json({message:'Non trouvée'});
@@ -724,7 +729,7 @@ router.post('/installments/:id/send-receipt', protect, allowRoles('ADMIN','TEACH
     } catch(err) { res.status(500).json({message:'Erreur', error:err.message}); }
 });
 
-router.post('/installments/:id/send-reminder', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.post('/installments/:id/send-reminder', protect, adminOnly, async (req, res) => {
     try {
         const inst = await prisma.installment.findUnique({ where:{id:parseInt(req.params.id)}, include:{contract:{include:contractInclude}} });
         if (!inst)                     return res.status(404).json({message:'Non trouvée'});
@@ -746,7 +751,7 @@ router.post('/installments/:id/send-reminder', protect, allowRoles('ADMIN','TEAC
     } catch(err) { res.status(500).json({message:'Erreur', error:err.message}); }
 });
 
-router.post('/reminders/send-all', protect, allowRoles('ADMIN'), async (req, res) => {
+router.post('/reminders/send-all', protect, adminOnly, async (req, res) => {
     try {
         const lateInst = await prisma.installment.findMany({ where:{status:'LATE'}, include:{contract:{include:contractInclude}} });
         const results  = [];
@@ -776,7 +781,7 @@ router.post('/reminders/send-all', protect, allowRoles('ADMIN'), async (req, res
 // ROUTES — STATISTIQUES
 // ══════════════════════════════════════════════════════════
 
-router.get('/stats', protect, allowRoles('ADMIN','TEACHER'), async (req, res) => {
+router.get('/stats', protect, adminOnly, async (req, res) => {
     try {
         const { ville } = req.query;
         const whereC = ville ? { ville } : {};
@@ -816,7 +821,7 @@ router.get('/stats', protect, allowRoles('ADMIN','TEACHER'), async (req, res) =>
     } catch(err) { res.status(500).json({message:'Erreur', error:err.message}); }
 });
 
-router.get('/dashboard-summary', protect, async (req, res) => {
+router.get('/dashboard-summary', protect, adminOnly, async (req, res) => {
     try {
         const [totalRevenue, lateCount, pendingCount, thisMonthPaid] = await Promise.all([
             prisma.installment.aggregate({ _sum:{paidAmount:true}, where:{status:'PAID'} }),

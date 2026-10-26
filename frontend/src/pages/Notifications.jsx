@@ -14,7 +14,7 @@ export default function Notifications() {
         fetchNotifs();
         const interval = setInterval(fetchNotifs, 30000);
         return () => clearInterval(interval);
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchNotifs = async () => {
         try { const res = await api.get('/notifications'); setNotifs(res.data); }
@@ -35,7 +35,7 @@ export default function Notifications() {
         if (!notif.lu) await markRead(notif.id);
         setOpen(false);
         if (notif.type === 'NOTE') navigate('/my-grades');
-        else if (notif.type === 'DEVOIR') navigate(user?.role === 'STUDENT' ? '/homeworks' : '/homeworks');
+        else if (notif.type === 'DEVOIR') navigate(user?.role === 'STUDENT' ? '/my-grades' : '/homeworks');
         else navigate(user?.role === 'STUDENT' ? '/course' : '/dashboard');
     };
 

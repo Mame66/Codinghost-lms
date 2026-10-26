@@ -1,23 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { login, register, me } = require('../controllers/authController');
-const { protect, allowRoles } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const { protect, adminOnly, staffOnly } = require('../middleware/authMiddleware');
+const prisma = require('../lib/prisma');
 
 router.post('/login', login);
-router.post('/register', protect, allowRoles('ADMIN', 'TEACHER'), register);
+router.post('/register', protect, adminOnly, register);
 router.get('/me', protect, me);
 
-// GET tous les enseignants et admins
-router.get('/teachers', protect, async (req, res) => {
+// GET enseignants + admins actifs (listes déroulantes des groupes)
+router.get('/teachers', protect, staffOnly, async (req, res) => {
     try {
         const teachers = await prisma.user.findMany({
-            where: {
-                role: { in: ['TEACHER', 'ADMIN'] }
-            },
-            select: { id: true, nom: true, prenom: true, role: true }
+            where: { role: { in: ['TEACHER', 'ADMIN'] }, actif: true },
+            select: { id: true, nom: true, prenom: true, role: true, avatarUrl: true },
+            orderBy: [{ prenom: 'asc' }, { nom: 'asc' }],
         });
         res.json(teachers);
     } catch (err) {

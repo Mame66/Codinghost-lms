@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
+import Avatar from '../components/Avatar';
+import { AudienceBadge } from '../utils/audience';
 
 const Icon = ({ name, size = 16, color = 'currentColor' }) => {
     const icons = {
@@ -42,7 +44,7 @@ export default function Attendance() {
     const [showDetail, setShowDetail] = useState(null);
     const [tooltip, setTooltip] = useState(null);
 
-    useEffect(() => { fetchGroups(); }, []);
+    useEffect(() => { fetchGroups(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchGroups = async () => {
         try { const res = await api.get('/groups'); setGroups(res.data); }
@@ -138,7 +140,10 @@ export default function Attendance() {
                             <div style={s.groupCardInner}>
                                 <div style={{ ...s.groupDot, background: selectedGroup?.id === g.id ? '#5B2EE8' : '#E5E7EB' }} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={s.groupCardTitle}>{g.titre}</div>
+                                    <div style={{ ...s.groupCardTitle, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.titre}</span>
+                                        <AudienceBadge audience={g.audience} size="sm" />
+                                    </div>
                                     {g.teacher && (
                                         <div style={s.groupCardMeta}>
                                             <Icon name="teacher" size={10} color="#9CA3AF" />
@@ -286,9 +291,7 @@ export default function Attendance() {
                                             <div key={enrollment.id} style={s.tableRow}>
                                                 {/* Student */}
                                                 <div style={s.studentCell} onClick={() => setShowDetail(enrollment)}>
-                                                    <div style={s.avatar}>
-                                                        {enrollment.student?.user?.prenom?.[0]}{enrollment.student?.user?.nom?.[0]}
-                                                    </div>
+                                                    <Avatar user={enrollment.student?.user} size={36} />
                                                     <div>
                                                         <div style={s.studentName}>
                                                             {enrollment.student?.user?.prenom} {enrollment.student?.user?.nom}
@@ -402,9 +405,7 @@ export default function Attendance() {
                     <div style={s.modalBox} onClick={e => e.stopPropagation()}>
                         {/* Modal header */}
                         <div style={s.modalHeader}>
-                            <div style={s.modalAvatar}>
-                                {showDetail.student?.user?.prenom?.[0]}{showDetail.student?.user?.nom?.[0]}
-                            </div>
+                            <Avatar user={showDetail.student?.user} size={48} />
                             <div>
                                 <div style={s.modalName}>
                                     {showDetail.student?.user?.prenom} {showDetail.student?.user?.nom}
