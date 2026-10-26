@@ -36,6 +36,7 @@ export const AuthProvider = ({ children }) => {
     }, [token, logout]);
 
     // espace : 'ENFANT' | 'ADULTE' | 'EQUIPE'
+    // espace : 'ENFANT' | 'ADULTE' | 'EQUIPE'
     // En cas de mauvais espace, l'erreur contient err.response.data.code === 'WRONG_SPACE'
     const login = async (loginVal, password, espace) => {
         const res = await api.post('/auth/login', { login: loginVal, password, espace });
